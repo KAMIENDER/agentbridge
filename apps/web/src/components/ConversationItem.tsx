@@ -15,6 +15,12 @@ import { DiffBlock } from "./DiffBlock";
 import { MarkdownText } from "./MarkdownText";
 import { McpToolBlock } from "./McpToolBlock";
 import { ToolCallRow } from "./ToolCallRow";
+import {
+  ConversationImage,
+  imageSourceFromUrl,
+  localImageSource,
+  type ConversationImageSource,
+} from "./ConversationImage";
 
 type UserMessageLikeItem = Extract<
   UnifiedItem,
@@ -63,19 +69,70 @@ function readTextContent(content: UserMessageLikeItem["content"]): string {
         case "text":
           return part.text;
         case "image":
-          return "[Image attached]";
         case "localImage":
-          return `[Local image] ${part.path}`;
+          return "";
         case "skill":
           return `[Skill] ${part.name}`;
         case "mention":
           return `[Mention] ${part.name}`;
-        default:
-          return "";
       }
     })
     .filter((text) => text.trim().length > 0)
     .join("\n");
+}
+
+function readImageSources(
+  content: UserMessageLikeItem["content"],
+): ConversationImageSource[] {
+  const sources: ConversationImageSource[] = [];
+  let imageIndex = 0;
+  content.forEach((part) => {
+    switch (part.type) {
+      case "image":
+        imageIndex += 1;
+        sources.push(
+          imageSourceFromUrl(part.url, `Attached image ${String(imageIndex)}`),
+        );
+        break;
+      case "localImage":
+        imageIndex += 1;
+        sources.push(
+          localImageSource(part.path, `Attached image ${String(imageIndex)}`),
+        );
+        break;
+      case "text":
+      case "skill":
+      case "mention":
+        break;
+    }
+  });
+  return sources;
+}
+
+function UserMessageBubble({ item }: { item: UserMessageLikeItem }) {
+  const text = trimInjectedBrowserContext(readTextContent(item.content));
+  const images = readImageSources(item.content);
+  if (!text && images.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
+        {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
+        {images.length > 0 && (
+          <div className={text ? "mt-2 grid gap-2" : "grid gap-2"}>
+            {images.map((source, index) => (
+              <ConversationImage
+                key={`${source.type}:${source.title ?? source.label}:${String(index)}`}
+                source={source}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function trimInjectedBrowserContext(text: string): string {
@@ -127,35 +184,9 @@ type ItemRendererMap = {
 };
 
 const ITEM_RENDERERS = {
-  userMessage: ({ item }) => {
-    const text = trimInjectedBrowserContext(readTextContent(item.content));
-    if (!text) {
-      return null;
-    }
+  userMessage: ({ item }) => <UserMessageBubble item={item} />,
 
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
-          <p className="whitespace-pre-wrap break-words">{text}</p>
-        </div>
-      </div>
-    );
-  },
-
-  steeringUserMessage: ({ item }) => {
-    const text = trimInjectedBrowserContext(readTextContent(item.content));
-    if (!text) {
-      return null;
-    }
-
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
-          <p className="whitespace-pre-wrap break-words">{text}</p>
-        </div>
-      </div>
-    );
-  },
+  steeringUserMessage: ({ item }) => <UserMessageBubble item={item} />,
 
   agentMessage: ({ item }) => {
     if (!item.text) {
@@ -329,8 +360,30 @@ const ITEM_RENDERERS = {
           </div>
         )}
         {item.contentItems && item.contentItems.length > 0 && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            Output parts: {item.contentItems.length}
+          <div className="mt-2 grid gap-2">
+            {item.contentItems.map((contentItem, index) => {
+              switch (contentItem.type) {
+                case "inputText":
+                  return (
+                    <div
+                      key={`text-${String(index)}`}
+                      className="rounded-md bg-muted/40 px-2 py-1 text-xs text-foreground/80 whitespace-pre-wrap break-words"
+                    >
+                      {contentItem.text}
+                    </div>
+                  );
+                case "inputImage":
+                  return (
+                    <ConversationImage
+                      key={`image-${contentItem.imageUrl}-${String(index)}`}
+                      source={imageSourceFromUrl(
+                        contentItem.imageUrl,
+                        `Tool output image ${String(index + 1)}`,
+                      )}
+                    />
+                  );
+              }
+            })}
           </div>
         )}
         <div className="mt-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
@@ -369,7 +422,13 @@ const ITEM_RENDERERS = {
       title="Viewed image"
       className={toolSpacing}
     >
-      Viewed image: {item.path}
+      <ConversationImage
+        source={localImageSource(item.path, "Viewed image")}
+        className="mt-1"
+      />
+      <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+        {item.path}
+      </div>
     </ToolCallRow>
   ),
 
