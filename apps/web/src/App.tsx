@@ -22,12 +22,15 @@ import {
   KeyRound,
   Loader2,
   Menu,
+  Monitor,
   Moon,
   Palette,
   PanelLeft,
   Plus,
   RefreshCw,
   Search,
+  Server,
+  Shield,
   Sun,
   X,
 } from "lucide-react";
@@ -6048,197 +6051,329 @@ export function App(): React.JSX.Element {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[1px] p-4 md:p-8 flex items-center justify-center"
+            className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[1px] p-0 md:p-8 flex items-stretch md:items-center justify-center"
             onClick={() => setIsSettingsModalOpen(false)}
           >
             <motion.div
-              initial={{ scale: 0.98, opacity: 0 }}
+              initial={{ scale: 0.985, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
+              exit={{ scale: 0.985, opacity: 0 }}
               transition={{ duration: 0.16 }}
               onClick={(event) => event.stopPropagation()}
-              className="w-full max-w-xl rounded-xl border border-border bg-background shadow-2xl overflow-hidden"
+              className="grid h-full w-full overflow-hidden border-border bg-background shadow-2xl md:h-[min(88vh,840px)] md:max-w-5xl md:grid-cols-[240px_minmax(0,1fr)] md:rounded-2xl md:border"
             >
-              <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold">Settings</div>
-                  <div className="text-xs text-muted-foreground">
-                    Configure how this frontend connects to your server.
+              <aside className="flex min-h-0 flex-col border-b border-border bg-muted/25 md:border-b-0 md:border-r">
+                <div className="flex items-start justify-between gap-3 px-4 py-4 md:block">
+                  <div>
+                    <div className="text-base font-semibold">Settings</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Farfield connection preferences
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 md:hidden"
+                    onClick={() => setIsSettingsModalOpen(false)}
+                    title="Close settings"
+                  >
+                    <X size={15} />
+                  </Button>
+                </div>
+
+                <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:block md:space-y-1 md:overflow-visible md:pb-0">
+                  <a
+                    href="#settings-connection"
+                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-foreground hover:bg-muted md:w-full"
+                  >
+                    <Server size={15} />
+                    Connection
+                  </a>
+                  <a
+                    href="#settings-profiles"
+                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground md:w-full"
+                  >
+                    <Monitor size={15} />
+                    Profiles
+                  </a>
+                  <a
+                    href="#settings-security"
+                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground md:w-full"
+                  >
+                    <Shield size={15} />
+                    Security
+                  </a>
+                </nav>
+
+                <div className="mt-auto hidden border-t border-border px-4 py-4 md:block">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Active
+                  </div>
+                  <div className="mt-1 truncate text-sm font-medium">
+                    {activeServerLabel}
+                  </div>
+                  <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                    {hasSavedServerTarget ? "Saved target" : "Automatic target"}
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setIsSettingsModalOpen(false)}
-                  title="Close settings"
-                >
-                  <X size={14} />
-                </Button>
-              </div>
+              </aside>
 
-              <div className="p-4 space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <Label className="text-sm font-medium">Profiles</Label>
-                      <div className="text-xs text-muted-foreground">
-                        Save one server per Mac and switch without changing browsers.
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate max-w-[12rem]">
-                      Active: {activeServerLabel}
+              <section className="flex min-h-0 flex-col">
+                <div className="hidden items-center justify-between border-b border-border px-6 py-4 md:flex">
+                  <div>
+                    <div className="text-lg font-semibold">Connection</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      Choose the Mac this frontend controls.
                     </div>
                   </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setIsSettingsModalOpen(false)}
+                    title="Close settings"
+                  >
+                    <X size={15} />
+                  </Button>
+                </div>
 
-                  {serverProfiles.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {serverProfiles.map((profile) => {
-                        const isActive = profile.baseUrl === serverBaseUrl;
-                        return (
-                          <div
-                            key={profile.id}
-                            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
-                              isActive
-                                ? "border-primary/60 bg-primary/5"
-                                : "border-border bg-muted/20"
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              className="min-w-0 flex-1 text-left"
-                              onClick={() => {
-                                void applyServerProfile(profile);
-                              }}
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-7">
+                  <div className="mx-auto max-w-3xl space-y-8">
+                    <section id="settings-connection" className="space-y-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">Connection</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Set the Farfield server URL used by this browser.
+                        </p>
+                      </div>
+
+                      <div className="overflow-hidden rounded-xl border border-border bg-background">
+                        <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+                          <div className="min-w-0">
+                            <Label
+                              htmlFor="settings-server-url"
+                              className="text-sm font-medium"
                             >
-                              <div className="truncate text-sm font-medium">
-                                {profile.name}
-                              </div>
-                              <div className="truncate text-xs text-muted-foreground">
-                                {profile.baseUrl}
-                              </div>
-                            </button>
-                            {isActive && (
-                              <span className="rounded-full bg-success/12 px-2 py-0.5 text-[11px] text-success">
-                                Active
-                              </span>
-                            )}
+                              Server URL
+                            </Label>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Use the Tailscale HTTPS address for this Mac.
+                            </div>
+                          </div>
+                          <Input
+                            id="settings-server-url"
+                            value={serverBaseUrlDraft}
+                            onChange={(e) => setServerBaseUrlDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveServerTarget();
+                              }
+                            }}
+                            placeholder="https://your-mac.tailnet.ts.net"
+                            className="h-9 text-base md:text-sm"
+                          />
+                        </div>
+
+                        <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">Current target</div>
+                            <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                              {serverBaseUrl}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap justify-start gap-2 md:justify-end">
                             <Button
                               type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0"
-                              onClick={() => deleteServerProfile(profile.id)}
-                              title={`Delete ${profile.name}`}
+                              onClick={() => {
+                                void saveServerTarget();
+                              }}
+                              variant="default"
+                              className="h-9 text-sm"
+                              disabled={
+                                serverBaseUrlDraft.trim().length === 0 ||
+                                !hasServerConnectionDraftChanges
+                              }
                             >
-                              <X size={13} />
+                              Save changes
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                void useDefaultServerTarget();
+                              }}
+                              variant="outline"
+                              className="h-9 text-sm"
+                            >
+                              Use automatic
                             </Button>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                      No saved profiles yet.
-                    </div>
-                  )}
-                </div>
+                        </div>
+                      </div>
+                    </section>
 
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">Server</Label>
-                  <div className="text-xs text-muted-foreground">
-                    Use your Tailscale HTTPS URL.
+                    <section id="settings-profiles" className="space-y-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">Profiles</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Keep one saved connection for each Mac.
+                        </p>
+                      </div>
+
+                      <div className="overflow-hidden rounded-xl border border-border bg-background">
+                        <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                          <div className="min-w-0">
+                            <Label
+                              htmlFor="settings-profile-name"
+                              className="text-sm font-medium"
+                            >
+                              Profile name
+                            </Label>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Name the current server before saving it.
+                            </div>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,16rem)_auto]">
+                            <Input
+                              id="settings-profile-name"
+                              value={serverProfileNameDraft}
+                              onChange={(e) =>
+                                setServerProfileNameDraft(e.target.value)
+                              }
+                              placeholder="MacBook Pro"
+                              className="h-9 text-base md:text-sm"
+                            />
+                            <Button
+                              type="button"
+                              onClick={saveCurrentServerProfile}
+                              variant="outline"
+                              className="h-9 text-sm"
+                              disabled={serverBaseUrlDraft.trim().length === 0}
+                            >
+                              Save profile
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-border">
+                          {serverProfiles.length > 0 ? (
+                            serverProfiles.map((profile) => {
+                              const isActive = profile.baseUrl === serverBaseUrl;
+                              return (
+                                <div
+                                  key={profile.id}
+                                  className={`grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center ${
+                                    isActive ? "bg-primary/5" : ""
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    className="min-w-0 text-left"
+                                    onClick={() => {
+                                      void applyServerProfile(profile);
+                                    }}
+                                  >
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span className="truncate text-sm font-medium">
+                                        {profile.name}
+                                      </span>
+                                      {isActive && (
+                                        <span className="rounded-full bg-success/12 px-2 py-0.5 text-[11px] text-success">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                                      {profile.baseUrl}
+                                    </div>
+                                  </button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 justify-self-start text-muted-foreground md:justify-self-end"
+                                    onClick={() => deleteServerProfile(profile.id)}
+                                    title={`Delete ${profile.name}`}
+                                  >
+                                    <X size={14} />
+                                  </Button>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="px-4 py-5 text-sm text-muted-foreground">
+                              No saved profiles yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section id="settings-security" className="space-y-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">Security</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Store the access key for the active server locally.
+                        </p>
+                      </div>
+
+                      <div className="overflow-hidden rounded-xl border border-border bg-background">
+                        <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+                          <div className="min-w-0">
+                            <Label
+                              htmlFor="settings-access-key"
+                              className="text-sm font-medium"
+                            >
+                              Access key
+                            </Label>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Required only when FARFIELD_ACCESS_KEY is set.
+                            </div>
+                          </div>
+                          <Input
+                            id="settings-access-key"
+                            type="password"
+                            value={serverAccessKeyDraft}
+                            onChange={(e) => setServerAccessKeyDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveServerTarget();
+                              }
+                            }}
+                            placeholder="Leave empty for no key"
+                            className="h-9 text-base md:text-sm"
+                          />
+                        </div>
+
+                        <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                          <div className="text-sm text-muted-foreground">
+                            {serverAccessKey
+                              ? "An access key is saved for this server."
+                              : "No access key is saved for this server."}
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              void saveServerTarget();
+                            }}
+                            variant="outline"
+                            className="h-9 justify-self-start text-sm md:justify-self-end"
+                            disabled={
+                              serverBaseUrlDraft.trim().length === 0 ||
+                              !hasServerConnectionDraftChanges
+                            }
+                          >
+                            Save security
+                          </Button>
+                        </div>
+                      </div>
+                    </section>
                   </div>
-                  <Input
-                    value={serverBaseUrlDraft}
-                    onChange={(e) => setServerBaseUrlDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void saveServerTarget();
-                      }
-                    }}
-                    placeholder="https://your-vpn-server.example.com"
-                    className="h-9 text-sm"
-                  />
                 </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium">Access key</Label>
-                  <div className="text-xs text-muted-foreground">
-                    Required only when the server has FARFIELD_ACCESS_KEY set.
-                  </div>
-                  <Input
-                    type="password"
-                    value={serverAccessKeyDraft}
-                    onChange={(e) => setServerAccessKeyDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void saveServerTarget();
-                      }
-                    }}
-                    placeholder="Leave empty if this server has no key"
-                    className="h-9 text-sm"
-                  />
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                  <Input
-                    value={serverProfileNameDraft}
-                    onChange={(e) => setServerProfileNameDraft(e.target.value)}
-                    placeholder="Profile name, e.g. MacBook Pro"
-                    className="h-9 text-sm"
-                  />
-                  <Button
-                    type="button"
-                    onClick={saveCurrentServerProfile}
-                    variant="outline"
-                    className="h-9 text-xs"
-                    disabled={serverBaseUrlDraft.trim().length === 0}
-                  >
-                    Save profile
-                  </Button>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      void saveServerTarget();
-                    }}
-                    variant="outline"
-                    className="h-8 text-xs"
-                    disabled={
-                      serverBaseUrlDraft.trim().length === 0 ||
-                      !hasServerConnectionDraftChanges
-                    }
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      void useDefaultServerTarget();
-                    }}
-                    variant="outline"
-                    className="h-8 text-xs"
-                  >
-                    Use automatic
-                  </Button>
-                </div>
-
-                <div className="text-xs text-muted-foreground break-all">
-                  Active: {serverBaseUrl}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Mode:{" "}
-                  {hasSavedServerTarget
-                    ? "Saved server target"
-                    : "Automatic server target"}
-                </div>
-              </div>
+              </section>
             </motion.div>
           </motion.div>
         )}
