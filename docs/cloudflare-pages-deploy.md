@@ -19,6 +19,12 @@ The workflow:
 
 Create a Cloudflare Pages project named `agentbridge`, or set the GitHub repository variable `CLOUDFLARE_PAGES_PROJECT_NAME` to the existing Pages project name.
 
+The current direct-upload Pages project is `agentbridge`, with production URL:
+
+```text
+https://agentbridge-8q9.pages.dev
+```
+
 Set the Pages project's production branch to `main`.
 
 Add these GitHub Actions secrets:

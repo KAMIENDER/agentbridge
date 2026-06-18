@@ -6,6 +6,12 @@ AgentBridge lets you read conversations, send messages, switch models, inspect a
 
 AgentBridge currently supports Codex and OpenCode.
 
+Hosted static frontend:
+
+```text
+https://agentbridge-8q9.pages.dev
+```
+
 ## Project Status
 
 AgentBridge is an independent open-source fork of [Farfield](https://github.com/achimala/farfield). The original project was created by [Anshu Chimala](https://github.com/achimala) and is licensed under MIT. This fork keeps that license and attribution while continuing development around private multi-device access.
@@ -157,7 +163,7 @@ Frontend build flags:
 
 ## Roadmap
 
-- A first-party hosted static frontend under an AgentBridge-owned domain
+- A stable custom domain for the hosted static frontend
 - Published npm packages under the `@agentbridge` scope
 - Clear setup scripts for macOS launchd
 - Better onboarding for multiple Macs and mobile PWA installs

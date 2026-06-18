@@ -15,11 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'farfield' }}
+  CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'agentbridge' }}
 
 jobs:
   deploy:
-    name: Deploy farfield.app
+    name: Deploy AgentBridge web
     runs-on: ubuntu-latest
 
     steps:
@@ -38,13 +38,13 @@ jobs:
         run: bun run prepare:workspace-dist
 
       - name: Typecheck web
-        run: bun run --filter @farfield/web typecheck
+        run: bun run --filter @agentbridge/web typecheck
 
       - name: Test web
-        run: bun run --filter @farfield/web test
+        run: bun run --filter @agentbridge/web test
 
       - name: Build web
-        run: bun run --filter @farfield/web build
+        run: bun run --filter @agentbridge/web build
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
