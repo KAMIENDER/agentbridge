@@ -75,6 +75,14 @@ export interface SteerTurnOptions {
   input: TurnStartParams["input"];
 }
 
+export interface ArchiveThreadOptions {
+  threadId: string;
+}
+
+export interface UnarchiveThreadOptions {
+  threadId: string;
+}
+
 const AppServerResumeThreadRequestSchema = z
   .object({
     threadId: z.string().min(1),
@@ -159,6 +167,18 @@ export class AppServerClient {
     });
 
     return parseWithSchema(AppServerListThreadsResponseSchema, result, "AppServerListThreadsResponse");
+  }
+
+  public async archiveThread(options: ArchiveThreadOptions): Promise<void> {
+    await this.transport.request("thread/archive", {
+      threadId: options.threadId
+    });
+  }
+
+  public async unarchiveThread(options: UnarchiveThreadOptions): Promise<void> {
+    await this.transport.request("thread/unarchive", {
+      threadId: options.threadId
+    });
   }
 
   public async listLoadedThreads(

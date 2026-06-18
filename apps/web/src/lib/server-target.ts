@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const STORAGE_KEY = "farfield.server-target.v1";
+const ACCESS_KEYS_STORAGE_KEY = "farfield.server-access-keys.v1";
 const DEFAULT_SERVER_PORT = 4311;
 
 const ServerProtocolSchema = z.enum(["http:", "https:"]);
@@ -67,12 +68,40 @@ const StoredServerTargetTextSchema = z.string().transform((raw, ctx) => {
   }
 });
 
+const StoredServerAccessKeysSchema = z.record(z.string(), z.string());
+
 const ApiPathSchema = z
   .string()
   .min(1, "API path is required")
   .regex(/^\//, "API path must start with '/'");
 
 export type StoredServerTarget = z.infer<typeof StoredServerTargetSchema>;
+
+function readStoredAccessKeyMap(): Record<string, string> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const raw = window.localStorage.getItem(ACCESS_KEYS_STORAGE_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const result = StoredServerAccessKeysSchema.safeParse(parsed);
+    return result.success ? result.data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredAccessKeyMap(value: Record<string, string>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(ACCESS_KEYS_STORAGE_KEY, JSON.stringify(value));
+}
 
 function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -129,6 +158,37 @@ export function clearStoredServerTarget(): void {
     return;
   }
   window.localStorage.removeItem(STORAGE_KEY);
+}
+
+export function readStoredServerAccessKey(baseUrlOverride?: string): string {
+  const baseUrl =
+    typeof baseUrlOverride === "string"
+      ? parseServerBaseUrl(baseUrlOverride)
+      : resolveServerBaseUrl();
+  return readStoredAccessKeyMap()[baseUrl] ?? "";
+}
+
+export function saveServerAccessKey(
+  baseUrl: string,
+  accessKey: string,
+): { baseUrl: string; accessKey: string } {
+  const parsedBaseUrl = parseServerBaseUrl(baseUrl);
+  const trimmedAccessKey = accessKey.trim();
+  const accessKeys = readStoredAccessKeyMap();
+  if (trimmedAccessKey) {
+    accessKeys[parsedBaseUrl] = trimmedAccessKey;
+  } else {
+    delete accessKeys[parsedBaseUrl];
+  }
+  writeStoredAccessKeyMap(accessKeys);
+  return {
+    baseUrl: parsedBaseUrl,
+    accessKey: trimmedAccessKey,
+  };
+}
+
+export function clearStoredServerAccessKey(baseUrl: string): void {
+  saveServerAccessKey(baseUrl, "");
 }
 
 export function resolveServerBaseUrl(): string {

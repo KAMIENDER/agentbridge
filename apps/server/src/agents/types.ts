@@ -106,6 +106,10 @@ export interface AgentInterruptInput {
   ownerClientId?: string;
 }
 
+export interface AgentArchiveThreadInput {
+  threadId: string;
+}
+
 export interface AgentThreadLiveState {
   ownerClientId: string | null;
   conversationState: AppServerReadThreadResponse["thread"] | null;
@@ -157,6 +161,8 @@ export interface AgentAdapter {
   submitUserInput?(
     input: AgentSubmitUserInputInput,
   ): Promise<{ ownerClientId: string; requestId: UserInputRequestId }>;
+  archiveThread?(input: AgentArchiveThreadInput): Promise<void>;
+  unarchiveThread?(input: AgentArchiveThreadInput): Promise<void>;
   readLiveState?(threadId: string): Promise<AgentThreadLiveState>;
   readStreamEvents?(
     threadId: string,

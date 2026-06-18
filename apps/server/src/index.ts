@@ -3,7 +3,7 @@ import type { Socket } from "node:net";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   getCodexServerNotificationMethodMapping,
@@ -62,6 +62,11 @@ import {
 
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
+const ACCESS_KEY = (
+  process.env["FARFIELD_ACCESS_KEY"] ??
+  process.env["FARFIELD_AUTH_KEY"] ??
+  ""
+).trim();
 const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "farfield/0.2.5";
 const IPC_RECONNECT_DELAY_MS = 1_000;
@@ -231,10 +236,77 @@ function jsonResponse(
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Headers":
+      "authorization, content-type, x-farfield-access-key",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
+}
+
+function accessKeyEnabled(): boolean {
+  return ACCESS_KEY.length > 0;
+}
+
+function accessKeyMatches(value: string | null | undefined): boolean {
+  if (!accessKeyEnabled() || typeof value !== "string") {
+    return false;
+  }
+  const candidate = value.trim();
+  if (!candidate) {
+    return false;
+  }
+  const expectedBuffer = Buffer.from(ACCESS_KEY, "utf8");
+  const candidateBuffer = Buffer.from(candidate, "utf8");
+  if (expectedBuffer.length !== candidateBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuffer, candidateBuffer);
+}
+
+function readRequestAccessKey(req: IncomingMessage): string | null {
+  const headerValue = req.headers["x-farfield-access-key"];
+  if (typeof headerValue === "string" && headerValue.trim()) {
+    return headerValue;
+  }
+  if (Array.isArray(headerValue)) {
+    const first = headerValue.find((value) => value.trim().length > 0);
+    if (first) {
+      return first;
+    }
+  }
+
+  const authorization = req.headers.authorization;
+  if (typeof authorization === "string") {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+function requestHasValidAccessKey(req: IncomingMessage): boolean {
+  if (!accessKeyEnabled()) {
+    return true;
+  }
+  return accessKeyMatches(readRequestAccessKey(req));
+}
+
+function writeAccessKeyFailure(
+  res: ServerResponse,
+  code: "accessKeyRequired" | "accessKeyInvalid",
+): void {
+  jsonResponse(res, 401, {
+    ok: false,
+    error: {
+      code,
+      message:
+        code === "accessKeyRequired"
+          ? "Access key required"
+          : "Invalid access key",
+    },
+  });
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -569,6 +641,11 @@ interface RateLimitsCacheEntry {
 
 const sidebarCacheByKey = new Map<string, SidebarCacheEntry>();
 const sidebarInFlightByKey = new Map<string, Promise<UnifiedSidebarResponse>>();
+
+function invalidateSidebarCache(): void {
+  sidebarCacheByKey.clear();
+  sidebarInFlightByKey.clear();
+}
 let rateLimitsCacheEntry: RateLimitsCacheEntry | null = null;
 let rateLimitsInFlight: Promise<AppServerGetAccountRateLimitsResponse> | null =
   null;
@@ -782,7 +859,7 @@ async function buildRealtimeCoreState() {
     const [sidebar, rateLimits, features] = await Promise.all([
       timeServerOperation("realtimeCoreSidebarList", () =>
         listUnifiedSidebarThreadsShared({
-          limit: 80,
+          limit: 50,
           archived: false,
           all: false,
           maxPages: 1,
@@ -1327,6 +1404,22 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
     const segments = pathname.split("/").filter(Boolean);
 
+    if (req.method === "GET" && pathname === "/api/auth/status") {
+      jsonResponse(res, 200, {
+        ok: true,
+        enabled: accessKeyEnabled(),
+      });
+      return;
+    }
+
+    if (segments[0] === "api" && !requestHasValidAccessKey(req)) {
+      writeAccessKeyFailure(
+        res,
+        readRequestAccessKey(req) ? "accessKeyInvalid" : "accessKeyRequired",
+      );
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/health") {
       jsonResponse(res, 200, {
         ok: true,
@@ -1453,6 +1546,151 @@ const server = http.createServer(async (req, res) => {
         rows: result.rows,
         errors: result.errors,
       });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      segments[0] === "api" &&
+      segments[1] === "unified" &&
+      segments[2] === "thread" &&
+      segments[3] &&
+      (segments[4] === "archive" || segments[4] === "unarchive")
+    ) {
+      const threadId = decodeURIComponent(segments[3]);
+      const action = segments[4];
+      const rawProvider = url.searchParams.get("provider");
+      const providerFromQuery = parseUnifiedProviderId(rawProvider);
+      if (rawProvider !== null && providerFromQuery === null) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidProvider",
+            message: `Provider ${rawProvider} is not supported`,
+            details: {
+              provider: rawProvider,
+            },
+          },
+        });
+        return;
+      }
+
+      const knownProviders = threadIndex.providers(threadId);
+      const resolvedProvider = threadIndex.resolve(threadId);
+      let provider = providerFromQuery ?? resolvedProvider;
+
+      if (!provider && knownProviders.length > 1) {
+        jsonResponse(res, 409, {
+          ok: false,
+          error: {
+            code: "threadProviderAmbiguous",
+            message: `Thread ${threadId} exists in multiple providers; provider query is required`,
+            details: {
+              threadId,
+              providers: knownProviders,
+            },
+          },
+        });
+        return;
+      }
+
+      if (!provider) {
+        const discoveredMatches = await discoverUnifiedThreads({
+          threadId,
+          includeTurns: false,
+        });
+        if (discoveredMatches.length > 1) {
+          jsonResponse(res, 409, {
+            ok: false,
+            error: {
+              code: "threadProviderAmbiguous",
+              message: `Thread ${threadId} exists in multiple providers; provider query is required`,
+              details: {
+                threadId,
+                providers: discoveredMatches.map((match) => match.provider),
+              },
+            },
+          });
+          return;
+        }
+        provider = discoveredMatches[0]?.provider ?? null;
+      }
+
+      if (!provider) {
+        jsonResponse(res, 404, {
+          ok: false,
+          error: {
+            code: "threadNotFound",
+            message: `Thread ${threadId} is not registered`,
+            details: {
+              threadId,
+            },
+          },
+        });
+        return;
+      }
+
+      const providerAdapter = registry.getAdapter(provider);
+      if (!providerAdapter || !providerAdapter.isEnabled()) {
+        jsonResponse(res, 503, {
+          ok: false,
+          error: {
+            code: "providerDisabled",
+            message: `Provider ${provider} is not available`,
+            details: {
+              provider,
+            },
+          },
+        });
+        return;
+      }
+
+      const operation =
+        action === "archive"
+          ? providerAdapter.archiveThread
+          : providerAdapter.unarchiveThread;
+      if (!operation) {
+        jsonResponse(res, 501, {
+          ok: false,
+          error: {
+            code: "threadArchiveUnsupported",
+            message: `Provider ${provider} does not support ${action}`,
+            details: {
+              provider,
+              threadId,
+              action,
+            },
+          },
+        });
+        return;
+      }
+
+      try {
+        await operation.call(providerAdapter, { threadId });
+        threadIndex.register(threadId, provider);
+        invalidateSidebarCache();
+        queueCoreDelta?.();
+        jsonResponse(res, 200, {
+          ok: true,
+          threadId,
+          provider,
+          archived: action === "archive",
+        });
+      } catch (error) {
+        const message = toErrorMessage(error);
+        jsonResponse(res, 500, {
+          ok: false,
+          error: {
+            code: "threadArchiveFailed",
+            message,
+            details: {
+              provider,
+              threadId,
+              action,
+            },
+          },
+        });
+      }
       return;
     }
 
@@ -1822,6 +2060,31 @@ const io = new SocketServer(server, {
     origin: "*",
     methods: ["GET", "POST"],
   },
+});
+
+io.use((socket, next) => {
+  if (!accessKeyEnabled()) {
+    next();
+    return;
+  }
+
+  const authAccessKey = socket.handshake.auth?.["accessKey"];
+  const headerAccessKey = socket.handshake.headers["x-farfield-access-key"];
+  const accessKey =
+    typeof authAccessKey === "string"
+      ? authAccessKey
+      : typeof headerAccessKey === "string"
+        ? headerAccessKey
+        : Array.isArray(headerAccessKey)
+          ? headerAccessKey[0]
+          : null;
+
+  if (accessKeyMatches(accessKey)) {
+    next();
+    return;
+  }
+
+  next(new Error(accessKey ? "accessKeyInvalid" : "accessKeyRequired"));
 });
 
 const realtimeCoordinator = new RealtimeCoordinator({

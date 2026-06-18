@@ -45,7 +45,17 @@ export const InputImagePartSchema = z
   })
   .passthrough();
 
-export const InputPartSchema = z.union([InputTextPartSchema, InputImagePartSchema]);
+export const GenericInputPartSchema = z
+  .object({
+    type: NonEmptyStringSchema
+  })
+  .passthrough();
+
+export const InputPartSchema = z.union([
+  InputTextPartSchema,
+  InputImagePartSchema,
+  GenericInputPartSchema
+]);
 
 export const TurnStartParamsSchema = z
   .object({
@@ -141,7 +151,7 @@ export const ErrorItemSchema = z
     type: z.literal("error"),
     message: z.string(),
     willRetry: z.boolean().optional(),
-    errorInfo: z.union([z.string(), z.null()]).optional(),
+    errorInfo: z.union([JsonValueSchema, z.null()]).optional(),
     additionalDetails: z.union([JsonValueSchema, z.null()]).optional()
   })
   .passthrough();

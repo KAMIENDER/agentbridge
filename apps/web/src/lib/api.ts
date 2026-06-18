@@ -31,10 +31,13 @@ import {
   buildServerUrl,
   buildServerWebSocketUrl,
   clearStoredServerTarget,
+  clearStoredServerAccessKey,
   getDefaultServerBaseUrl as getDefaultStoredServerBaseUrl,
   parseServerBaseUrl,
+  readStoredServerAccessKey,
   readStoredServerTarget,
   resolveServerBaseUrl,
+  saveServerAccessKey,
   saveServerBaseUrl,
 } from "./server-target";
 
@@ -385,6 +388,15 @@ const ReadThreadResponseSchema = z
   })
   .strict();
 
+const ArchiveThreadResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    threadId: z.string(),
+    provider: UnifiedProviderIdSchema,
+    archived: z.boolean(),
+  })
+  .passthrough();
+
 const ModelsResponseSchema = z
   .object({
     data: z.array(UnifiedModelSchema),
@@ -461,6 +473,21 @@ export function clearServerBaseUrl(): void {
   clearStoredServerTarget();
 }
 
+export function getServerAccessKey(baseUrlOverride?: string): string {
+  return readStoredServerAccessKey(baseUrlOverride);
+}
+
+export function setServerAccessKey(
+  baseUrl: string,
+  accessKey: string,
+): string {
+  return saveServerAccessKey(baseUrl, accessKey).accessKey;
+}
+
+export function clearServerAccessKey(baseUrl: string): void {
+  clearStoredServerAccessKey(baseUrl);
+}
+
 export function normalizeServerBaseUrl(value: string): string {
   return parseServerBaseUrl(value);
 }
@@ -473,7 +500,15 @@ async function requestJson(
   path: string,
   init?: RequestInit,
 ): Promise<{ response: Response; payload: JsonValue }> {
-  const response = await fetch(buildServerUrl(path), init);
+  const headers = new Headers(init?.headers);
+  const accessKey = readStoredServerAccessKey();
+  if (accessKey) {
+    headers.set("X-Farfield-Access-Key", accessKey);
+  }
+  const response = await fetch(buildServerUrl(path), {
+    ...init,
+    headers,
+  });
   const payload = JsonValueSchema.parse(await response.json());
   return {
     response,
@@ -523,6 +558,26 @@ function buildApiRequestError(payload: JsonValue): ApiRequestError {
   });
 }
 
+function notifyAccessKeyError(error: ApiRequestError): void {
+  if (
+    error.code !== "accessKeyRequired" &&
+    error.code !== "accessKeyInvalid"
+  ) {
+    return;
+  }
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent("farfield:access-key-error", {
+      detail: {
+        code: error.code,
+        message: error.message,
+      },
+    }),
+  );
+}
+
 async function requestEnvelope<T>(
   path: string,
   schema: z.ZodType<T>,
@@ -531,12 +586,16 @@ async function requestEnvelope<T>(
   const { response, payload } = await requestJson(path, init);
 
   if (!response.ok) {
-    throw buildApiRequestError(payload);
+    const error = buildApiRequestError(payload);
+    notifyAccessKeyError(error);
+    throw error;
   }
 
   const envelope = ApiEnvelopeSchema.parse(payload);
   if (!envelope.ok) {
-    throw buildApiRequestError(payload);
+    const error = buildApiRequestError(payload);
+    notifyAccessKeyError(error);
+    throw error;
   }
 
   return schema.parse(payload);
@@ -555,7 +614,9 @@ async function runUnifiedCommand(
   });
 
   if (!response.ok) {
-    throw buildApiRequestError(payload);
+    const error = buildApiRequestError(payload);
+    notifyAccessKeyError(error);
+    throw error;
   }
 
   const commandResponse = UnifiedCommandResponseSchema.parse(payload);
@@ -763,6 +824,26 @@ export async function readThread(
   return ReadThreadResponseSchema.parse({
     thread: payload.thread,
   });
+}
+
+export async function setThreadArchived(input: {
+  threadId: string;
+  provider?: AgentId;
+  archived: boolean;
+}): Promise<z.infer<typeof ArchiveThreadResponseSchema>> {
+  const params = new URLSearchParams();
+  if (typeof input.provider === "string") {
+    params.set("provider", input.provider);
+  }
+  const query = params.toString();
+  const action = input.archived ? "archive" : "unarchive";
+  return requestEnvelope(
+    `/api/unified/thread/${encodeURIComponent(input.threadId)}/${action}${query.length > 0 ? `?${query}` : ""}`,
+    ArchiveThreadResponseSchema,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function createThread(input?: {

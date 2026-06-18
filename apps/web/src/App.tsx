@@ -9,13 +9,17 @@ import {
 } from "react";
 import {
   Activity,
+  Archive,
+  ArchiveRestore,
   Bug,
   Circle,
   CircleDot,
   Folder,
   FolderOpen,
+  GitBranch,
   Github,
   GripVertical,
+  KeyRound,
   Loader2,
   Menu,
   Moon,
@@ -23,6 +27,7 @@ import {
   PanelLeft,
   Plus,
   RefreshCw,
+  Search,
   Sun,
   X,
 } from "lucide-react";
@@ -39,6 +44,7 @@ import {
   getPendingApprovalRequests,
   getPendingThreadRequests,
   getPendingUserInputRequests,
+  getServerAccessKey,
   getSavedServerBaseUrl,
   getServerBaseUrl,
   getStreamEvents,
@@ -54,16 +60,25 @@ import {
   markTrace,
   sendMessage,
   setCollaborationMode,
+  setThreadArchived,
   startTrace,
   stopTrace,
   submitUserInput,
   setServerBaseUrl,
+  setServerAccessKey,
   type AgentId,
 } from "@/lib/api";
 import {
   createUnifiedRealtimeSocket,
   type UnifiedRealtimeSocket,
 } from "@/lib/realtime-socket";
+import {
+  inferServerProfileName,
+  readServerProfiles,
+  removeServerProfile,
+  upsertServerProfile,
+  type ServerProfile,
+} from "@/lib/server-profiles";
 import {
   groupColors,
   readCollapseMap,
@@ -134,6 +149,7 @@ type PendingApprovalRequest = ReturnType<typeof getPendingApprovalRequests>[numb
 type PendingThreadRequest = ReturnType<typeof getPendingThreadRequests>[number];
 type PendingRequestId = PendingRequest["id"];
 type Thread = SidebarThreadsResponse["rows"][number];
+type SidebarArchiveMode = "active" | "archived";
 type ThreadListProviderErrors = SidebarThreadsResponse["errors"];
 type AgentDescriptor = AgentsResponse["agents"][number];
 type ConversationTurn = NonNullable<
@@ -325,6 +341,32 @@ function threadLabel(thread: Thread): string {
   const text = thread.preview.trim();
   if (!text) return `thread ${thread.id.slice(0, 8)}`;
   return text;
+}
+
+function normalizeSidebarSearch(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function threadMatchesSidebarSearch(thread: Thread, query: string): boolean {
+  const normalizedQuery = normalizeSidebarSearch(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const cwd = typeof thread.cwd === "string" ? thread.cwd : "";
+  const haystack = [
+    threadLabel(thread),
+    thread.preview,
+    cwd,
+    cwd ? basenameFromPath(cwd) : "",
+    thread.id,
+  ]
+    .join("\n")
+    .toLowerCase();
+
+  return normalizedQuery
+    .split(/\s+/)
+    .every((term) => term.length === 0 || haystack.includes(term));
 }
 
 function threadRecencyTimestamp(thread: Thread): number {
@@ -1127,12 +1169,80 @@ function buildReadThreadSyncSignature(
 }
 
 function basenameFromPath(value: string): string {
-  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalized = normalizeProjectPath(value);
   if (!normalized) {
     return value;
   }
   const parts = normalized.split("/").filter((part) => part.length > 0);
   return parts[parts.length - 1] ?? normalized;
+}
+
+function normalizeProjectPath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+function formatProjectPath(value: string): string {
+  return normalizeProjectPath(value).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+}
+
+const CODEX_PROJECT_SECTION_LABEL = "项目";
+const CODEX_PROJECTLESS_SECTION_LABEL = "对话";
+
+function isCodexProjectlessPath(value: string): boolean {
+  const normalized = normalizeProjectPath(value);
+  const marker = "/Documents/Codex/";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex === -1) {
+    return false;
+  }
+
+  const suffix = normalized.slice(markerIndex + marker.length);
+  return /^\d{4}-\d{2}-\d{2}(?:\/[^/]+|-.+)/.test(suffix);
+}
+
+function getCodexWorktreeInfo(
+  value: string,
+): { id: string; projectName: string } | null {
+  const normalized = normalizeProjectPath(value);
+  const match = normalized.match(/\/\.codex\/worktrees\/([^/]+)\/([^/]+)$/);
+  if (!match) {
+    return null;
+  }
+  return { id: match[1] ?? "", projectName: match[2] ?? "" };
+}
+
+function isCodexWorktreePath(value: string): boolean {
+  return getCodexWorktreeInfo(value) !== null;
+}
+
+function projectGroupKey(
+  projectPath: string,
+  worktreeProjectNames: ReadonlySet<string>,
+): string {
+  const projectName = basenameFromPath(projectPath);
+  if (worktreeProjectNames.has(projectName)) {
+    return `project-family:${projectName}`;
+  }
+  return `project:${projectPath}`;
+}
+
+function pushProjectPath(target: string[], value: string | null): void {
+  if (!value || target.includes(value)) {
+    return;
+  }
+  target.push(value);
+}
+
+function choosePrimaryProjectPath(paths: readonly string[]): string | null {
+  const sortedPaths = [...paths].sort((a, b) => {
+    const aIsWorktree = isCodexWorktreePath(a) ? 1 : 0;
+    const bIsWorktree = isCodexWorktreePath(b) ? 1 : 0;
+    if (aIsWorktree !== bIsWorktree) {
+      return aIsWorktree - bIsWorktree;
+    }
+    return a.localeCompare(b);
+  });
+  return sortedPaths[0] ?? null;
 }
 
 function normalizeManualGroupOrder(
@@ -1342,6 +1452,10 @@ export function App(): React.JSX.Element {
     () => getSavedServerBaseUrl() !== null,
     [],
   );
+  const initialServerAccessKey = useMemo(
+    () => getServerAccessKey(initialServerBaseUrl),
+    [initialServerBaseUrl],
+  );
   const initialSnapshot = ENABLE_VIEW_SNAPSHOT_CACHE
     ? appViewSnapshotCache
     : null;
@@ -1412,8 +1526,19 @@ export function App(): React.JSX.Element {
     useState<string>(initialServerBaseUrl);
   const [serverBaseUrlDraft, setServerBaseUrlDraft] =
     useState<string>(initialServerBaseUrl);
+  const [serverAccessKey, setServerAccessKeyState] =
+    useState<string>(initialServerAccessKey);
+  const [serverAccessKeyDraft, setServerAccessKeyDraft] =
+    useState<string>(initialServerAccessKey);
+  const [accessKeyErrorMessage, setAccessKeyErrorMessage] = useState("");
   const [hasSavedServerTarget, setHasSavedServerTarget] = useState<boolean>(
     initialHasSavedServerBaseUrl,
+  );
+  const [serverProfiles, setServerProfiles] = useState<ServerProfile[]>(() =>
+    readServerProfiles(),
+  );
+  const [serverProfileNameDraft, setServerProfileNameDraft] = useState(() =>
+    inferServerProfileName(initialServerBaseUrl),
   );
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
@@ -1421,10 +1546,13 @@ export function App(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(
     initialTab,
   );
+  const [sidebarArchiveMode, setSidebarArchiveMode] =
+    useState<SidebarArchiveMode>("active");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileSidebarDragOffset, setMobileSidebarDragOffset] = useState<
     number | null
   >(null);
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
   const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(
@@ -1530,9 +1658,32 @@ export function App(): React.JSX.Element {
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
   const hasServerBaseUrlDraftChanges =
     serverBaseUrlDraft.trim() !== serverBaseUrl;
+  const hasServerAccessKeyDraftChanges =
+    serverAccessKeyDraft.trim() !== serverAccessKey;
+  const hasServerConnectionDraftChanges =
+    hasServerBaseUrlDraftChanges || hasServerAccessKeyDraftChanges;
+  const showAccessKeyPrompt = accessKeyErrorMessage.length > 0;
+  const activeServerProfile = useMemo(
+    () =>
+      serverProfiles.find((profile) => profile.baseUrl === serverBaseUrl) ?? null,
+    [serverBaseUrl, serverProfiles],
+  );
+  const activeServerLabel =
+    activeServerProfile?.name ?? inferServerProfileName(serverBaseUrl);
   const unifiedWebSocketUrl = useMemo(
     () => getUnifiedWebSocketUrl(serverBaseUrl),
     [serverBaseUrl],
+  );
+  const normalizedSidebarSearchQuery = normalizeSidebarSearch(sidebarSearchQuery);
+  const isSidebarSearchActive = normalizedSidebarSearchQuery.length > 0;
+  const visibleSidebarThreads = useMemo(
+    () =>
+      normalizedSidebarSearchQuery
+        ? threads.filter((thread) =>
+            threadMatchesSidebarSearch(thread, normalizedSidebarSearchQuery),
+          )
+        : threads,
+    [normalizedSidebarSearchQuery, threads],
   );
   const upsertSidebarThread = useCallback((threadSummary: Thread) => {
     setThreads((previousThreads) => {
@@ -1565,21 +1716,56 @@ export function App(): React.JSX.Element {
       key: string;
       label: string;
       projectPath: string | null;
+      projectPaths: string[];
       latestUpdatedAt: number;
       preferredAgentId: AgentId | null;
       threads: Thread[];
       userColor: string | null;
     };
     const groups = new Map<string, Group>();
+    const allProjectPaths: string[] = [];
 
-    for (const thread of threads) {
+    for (const thread of visibleSidebarThreads) {
+      if (typeof thread.cwd === "string" && thread.cwd.trim()) {
+        const projectPath = normalizeProjectPath(thread.cwd.trim());
+        if (!isCodexProjectlessPath(projectPath)) {
+          allProjectPaths.push(projectPath);
+        }
+      }
+    }
+    for (const descriptor of agentDescriptors) {
+      for (const directory of descriptor.projectDirectories) {
+        if (directory.trim()) {
+          const projectPath = normalizeProjectPath(directory.trim());
+          if (!isCodexProjectlessPath(projectPath)) {
+            allProjectPaths.push(projectPath);
+          }
+        }
+      }
+    }
+
+    const worktreeProjectNames = new Set<string>();
+    for (const projectPath of allProjectPaths) {
+      if (isCodexWorktreePath(projectPath)) {
+        worktreeProjectNames.add(basenameFromPath(projectPath));
+      }
+    }
+
+    for (const thread of visibleSidebarThreads) {
       const cwd =
         typeof thread.cwd === "string" && thread.cwd.trim()
-          ? thread.cwd.trim()
+          ? normalizeProjectPath(thread.cwd.trim())
           : null;
       const projectPath = cwd;
-      const key = projectPath ? `project:${projectPath}` : "project:unknown";
+      if (projectPath && isCodexProjectlessPath(projectPath)) {
+        continue;
+      }
+      const key = projectPath
+        ? projectGroupKey(projectPath, worktreeProjectNames)
+        : "project:unknown";
       const label = projectPath ? basenameFromPath(projectPath) : "Unknown";
+      const groupProjectPath = projectPath;
+      const groupProjectPaths = groupProjectPath ? [groupProjectPath] : [];
       const updatedAt = threadRecencyTimestamp(thread);
       const threadAgentId = thread.provider;
       const projectColor = projectColors[key] ?? null;
@@ -1587,6 +1773,8 @@ export function App(): React.JSX.Element {
       const existing = groups.get(key);
       if (existing) {
         existing.threads.push(thread);
+        pushProjectPath(existing.projectPaths, groupProjectPath);
+        existing.projectPath = choosePrimaryProjectPath(existing.projectPaths);
         if (!existing.preferredAgentId) {
           existing.preferredAgentId = threadAgentId;
         }
@@ -1597,7 +1785,8 @@ export function App(): React.JSX.Element {
         groups.set(key, {
           key,
           label,
-          projectPath,
+          projectPath: groupProjectPath,
+          projectPaths: groupProjectPaths,
           latestUpdatedAt: updatedAt,
           preferredAgentId: threadAgentId,
           threads: [thread],
@@ -1612,19 +1801,20 @@ export function App(): React.JSX.Element {
         if (!normalized) {
           continue;
         }
-        const key = `project:${normalized}`;
-        if (groups.has(key)) {
+        const projectPath = normalizeProjectPath(normalized);
+        if (isCodexProjectlessPath(projectPath)) {
           continue;
         }
-        groups.set(key, {
-          key,
-          label: basenameFromPath(normalized),
-          projectPath: normalized,
-          latestUpdatedAt: 0,
-          preferredAgentId: descriptor.id,
-          threads: [],
-          userColor: projectColors[key] ?? null,
-        });
+        const key = projectGroupKey(projectPath, worktreeProjectNames);
+        const existing = groups.get(key);
+        if (!existing) {
+          continue;
+        }
+        pushProjectPath(existing.projectPaths, projectPath);
+        existing.projectPath = choosePrimaryProjectPath(existing.projectPaths);
+        if (!existing.preferredAgentId) {
+          existing.preferredAgentId = descriptor.id;
+        }
       }
     }
 
@@ -1646,7 +1836,18 @@ export function App(): React.JSX.Element {
     );
 
     return allGroups;
-  }, [agentDescriptors, projectColors, sidebarOrder, threads]);
+  }, [agentDescriptors, projectColors, sidebarOrder, visibleSidebarThreads]);
+  const conversationThreads = useMemo(
+    () =>
+      visibleSidebarThreads
+        .filter((thread) =>
+          typeof thread.cwd === "string" && thread.cwd.trim()
+            ? isCodexProjectlessPath(thread.cwd.trim())
+            : false,
+        )
+        .sort(compareThreadsByRecency),
+    [visibleSidebarThreads],
+  );
   const activeLiveState = useMemo(
     () => (liveState?.threadId === selectedThreadId ? liveState : null),
     [liveState, selectedThreadId],
@@ -1813,6 +2014,19 @@ export function App(): React.JSX.Element {
 
     return getLatestTokenUsageFromStreamEvents(streamEvents, selectedThreadId);
   }, [conversationState?.latestTokenUsageInfo, selectedThreadId, streamEvents]);
+  const selectedThreadProjectPath = useMemo(() => {
+    const cwd = selectedThread?.cwd;
+    return typeof cwd === "string" && cwd.trim()
+      ? normalizeProjectPath(cwd.trim())
+      : null;
+  }, [selectedThread?.cwd]);
+  const selectedThreadWorktreeInfo = useMemo(
+    () =>
+      selectedThreadProjectPath
+        ? getCodexWorktreeInfo(selectedThreadProjectPath)
+        : null,
+    [selectedThreadProjectPath],
+  );
 
   const planModeOption = useMemo(
     () => modes.find((mode) => isPlanModeOption(mode)) ?? null,
@@ -2113,7 +2327,7 @@ export function App(): React.JSX.Element {
       health?.state.ipcInitialized === false
     : !openCodeConnected;
   /* Data loading */
-  const loadCoreData = useCallback(async () => {
+  const loadCoreData = useCallback(async (options?: { archiveMode?: SidebarArchiveMode }) => {
     setIsCoreLoading(true);
     try {
     const shouldLoadDebugData = activeTabRef.current === "debug";
@@ -2136,11 +2350,13 @@ export function App(): React.JSX.Element {
     const rateLimitsPromise = DISABLE_RATE_LIMITS
       ? Promise.resolve(null)
       : getAccountRateLimits().catch(() => null);
+    const requestedArchiveMode = options?.archiveMode ?? sidebarArchiveMode;
+    const isArchivedView = requestedArchiveMode === "archived";
     const sidebarPromise = listSidebarThreads({
-      limit: 80,
-      archived: false,
-      all: false,
-      maxPages: 1,
+      limit: isArchivedView ? 120 : 50,
+      archived: isArchivedView,
+      all: isArchivedView,
+      maxPages: isArchivedView ? 20 : 1,
     });
     const tracePromise = shouldLoadDebugData
       ? getTraceStatus()
@@ -2176,8 +2392,7 @@ export function App(): React.JSX.Element {
           continue;
         }
         const shouldKeepThread =
-          optimisticSelectedThreadIdsRef.current.has(thread.id) ||
-          thread.id === selectedThreadIdRef.current;
+          optimisticSelectedThreadIdsRef.current.has(thread.id);
         if (!shouldKeepThread) {
           continue;
         }
@@ -2454,7 +2669,7 @@ export function App(): React.JSX.Element {
     } finally {
       setIsCoreLoading(false);
     }
-  }, [agentDescriptors, selectedAgentId]);
+  }, [agentDescriptors, selectedAgentId, sidebarArchiveMode]);
 
   const loadSelectedThread = useCallback(
     async (
@@ -2571,7 +2786,6 @@ export function App(): React.JSX.Element {
         const nextIsGenerating = live.conversationState
           ? isThreadGeneratingState(live.conversationState)
           : isThreadGeneratingState(read.thread);
-        const selectedSummary = buildThreadSummaryFromReadThread(read.thread);
         let sawThread = false;
         const nextThreads = previousThreads.map((threadSummary) => {
           if (threadSummary.id !== read.thread.id) {
@@ -2604,10 +2818,6 @@ export function App(): React.JSX.Element {
             ...(nextTitle !== undefined ? { title: nextTitle } : {}),
           };
         });
-        if (!sawThread) {
-          nextThreads.push(selectedSummary);
-        }
-
         const sortedThreads = sortThreadsByRecency(nextThreads);
         const nextSignature = buildThreadsSignature(sortedThreads);
         if (signaturesMatch(threadsSignatureRef.current, nextSignature)) {
@@ -2718,36 +2928,193 @@ export function App(): React.JSX.Element {
     }
   }, [loadCoreData, loadSelectedThread]);
 
-  const saveServerTarget = useCallback(async () => {
-    try {
+  const switchSidebarArchiveMode = useCallback(
+    (mode: SidebarArchiveMode) => {
+      if (mode === sidebarArchiveMode) {
+        return;
+      }
+      setSidebarArchiveMode(mode);
+      threadsSignatureRef.current = [];
+      setThreads([]);
+      setSidebarCollapsedGroups({});
+      void loadCoreData({ archiveMode: mode });
+    },
+    [loadCoreData, sidebarArchiveMode],
+  );
+
+  const runSetThreadArchived = useCallback(
+    async (thread: Thread, archived: boolean) => {
+      const movesOutOfCurrentView =
+        (sidebarArchiveMode === "active" && archived) ||
+        (sidebarArchiveMode === "archived" && !archived);
+      setIsBusy(true);
+      try {
+        setError("");
+        await setThreadArchived({
+          threadId: thread.id,
+          provider: thread.provider,
+          archived,
+        });
+        threadsSignatureRef.current = [];
+        setThreads((previousThreads) =>
+          movesOutOfCurrentView
+            ? previousThreads.filter((entry) => entry.id !== thread.id)
+            : previousThreads,
+        );
+        if (movesOutOfCurrentView && selectedThreadIdRef.current === thread.id) {
+          selectedThreadIdRef.current = null;
+          setSelectedThreadId(null);
+          setLiveState(null);
+          setReadThreadState(null);
+          setStreamEvents([]);
+        }
+        await loadCoreData({ archiveMode: sidebarArchiveMode });
+      } catch (e) {
+        setError(toErrorMessage(e));
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [loadCoreData, sidebarArchiveMode],
+  );
+
+  const clearServerScopedState = useCallback(() => {
+    selectedThreadIdRef.current = null;
+    setSelectedThreadId(null);
+    setThreads([]);
+    setThreadListErrors({ codex: null, opencode: null });
+    setLiveState(null);
+    setReadThreadState(null);
+    setStreamEvents([]);
+    setSelectedRequestId(null);
+    setAnswerDraft({});
+    setAgentDescriptors([]);
+    setHistory([]);
+    setHistoryDetail(null);
+    setSelectedHistoryId("");
+    agentCacheRef.current = null;
+    providerCatalogCacheRef.current.clear();
+    realtimeSocketRef.current?.disconnect();
+    realtimeSocketRef.current = null;
+  }, []);
+
+  const switchServerTarget = useCallback(
+    async (baseUrl: string, options?: { saved: boolean }) => {
       setError("");
-      const normalizedBaseUrl = setServerBaseUrl(serverBaseUrlDraft);
+      const normalizedBaseUrl = setServerBaseUrl(baseUrl);
+      const nextAccessKey = getServerAccessKey(normalizedBaseUrl);
       setServerBaseUrlState(normalizedBaseUrl);
       setServerBaseUrlDraft(normalizedBaseUrl);
-      setHasSavedServerTarget(true);
-      agentCacheRef.current = null;
-      providerCatalogCacheRef.current.clear();
-      await refreshAll();
+      setServerAccessKeyState(nextAccessKey);
+      setServerAccessKeyDraft(nextAccessKey);
+      setAccessKeyErrorMessage("");
+      setServerProfileNameDraft(inferServerProfileName(normalizedBaseUrl));
+      setHasSavedServerTarget(options?.saved ?? true);
+      clearServerScopedState();
+      await loadCoreData();
+    },
+    [clearServerScopedState, loadCoreData],
+  );
+
+  const saveServerTarget = useCallback(async () => {
+    try {
+      const savedAccessKey = setServerAccessKey(
+        serverBaseUrlDraft,
+        serverAccessKeyDraft,
+      );
+      setServerAccessKeyState(savedAccessKey);
+      setServerAccessKeyDraft(savedAccessKey);
+      setAccessKeyErrorMessage("");
+      await switchServerTarget(serverBaseUrlDraft, { saved: true });
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [refreshAll, serverBaseUrlDraft]);
+  }, [serverAccessKeyDraft, serverBaseUrlDraft, switchServerTarget]);
+
+  const saveAccessKeyAndRetry = useCallback(async () => {
+    try {
+      setError("");
+      const savedAccessKey = setServerAccessKey(
+        serverBaseUrl,
+        serverAccessKeyDraft,
+      );
+      setServerAccessKeyState(savedAccessKey);
+      setServerAccessKeyDraft(savedAccessKey);
+      setAccessKeyErrorMessage("");
+      clearServerScopedState();
+      await loadCoreData();
+      if (selectedThreadIdRef.current) {
+        await loadSelectedThread(selectedThreadIdRef.current, {
+          includeTurns: true,
+          includeStreamEvents: activeTabRef.current === "debug",
+        });
+      }
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }, [
+    clearServerScopedState,
+    loadCoreData,
+    loadSelectedThread,
+    serverAccessKeyDraft,
+    serverBaseUrl,
+  ]);
+
+  const saveCurrentServerProfile = useCallback(() => {
+    try {
+      setError("");
+      const nextProfiles = upsertServerProfile({
+        name: serverProfileNameDraft,
+        baseUrl: serverBaseUrlDraft,
+      });
+      const savedAccessKey = setServerAccessKey(
+        serverBaseUrlDraft,
+        serverAccessKeyDraft,
+      );
+      setServerProfiles(nextProfiles);
+      setServerAccessKeyState(savedAccessKey);
+      setServerAccessKeyDraft(savedAccessKey);
+      setAccessKeyErrorMessage("");
+      setServerProfileNameDraft(inferServerProfileName(serverBaseUrlDraft));
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }, [serverAccessKeyDraft, serverBaseUrlDraft, serverProfileNameDraft]);
+
+  const applyServerProfile = useCallback(
+    async (profile: ServerProfile) => {
+      try {
+        await switchServerTarget(profile.baseUrl, { saved: true });
+      } catch (e) {
+        setError(toErrorMessage(e));
+      }
+    },
+    [switchServerTarget],
+  );
+
+  const deleteServerProfile = useCallback((profileId: string) => {
+    setServerProfiles(removeServerProfile(profileId));
+  }, []);
 
   const useDefaultServerTarget = useCallback(async () => {
     try {
       setError("");
       clearServerBaseUrl();
       const defaultBaseUrl = getDefaultServerBaseUrl();
+      const defaultAccessKey = getServerAccessKey(defaultBaseUrl);
       setServerBaseUrlState(defaultBaseUrl);
       setServerBaseUrlDraft(defaultBaseUrl);
+      setServerAccessKeyState(defaultAccessKey);
+      setServerAccessKeyDraft(defaultAccessKey);
+      setAccessKeyErrorMessage("");
+      setServerProfileNameDraft(inferServerProfileName(defaultBaseUrl));
       setHasSavedServerTarget(false);
-      agentCacheRef.current = null;
-      providerCatalogCacheRef.current.clear();
-      await refreshAll();
+      clearServerScopedState();
+      await loadCoreData();
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [refreshAll]);
+  }, [clearServerScopedState, loadCoreData]);
 
   const applyRealtimeCoreState = useCallback(
     (coreState: UnifiedRealtimeCoreState) => {
@@ -2782,8 +3149,7 @@ export function App(): React.JSX.Element {
             continue;
           }
           const shouldKeepThread =
-            optimisticSelectedThreadIdsRef.current.has(thread.id) ||
-            thread.id === selectedThreadIdRef.current;
+            optimisticSelectedThreadIdsRef.current.has(thread.id);
           if (!shouldKeepThread) {
             continue;
           }
@@ -3190,9 +3556,25 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    const onAccessKeyError = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      const message = detail?.message ?? "Access key required";
+      setAccessKeyErrorMessage(message);
+      setError(message);
+    };
+
+    window.addEventListener("farfield:access-key-error", onAccessKeyError);
+    return () => {
+      window.removeEventListener("farfield:access-key-error", onAccessKeyError);
+    };
+  }, []);
+
+  useEffect(() => {
     const socket = createUnifiedRealtimeSocket({
       socketUrl: unifiedWebSocketUrl,
+      accessKey: serverAccessKey,
       onConnect: () => {
+        setAccessKeyErrorMessage("");
         socket.send({
           kind: "hello",
           selectedThreadId: selectedThreadIdRef.current,
@@ -3201,6 +3583,10 @@ export function App(): React.JSX.Element {
       },
       onDisconnect: () => {
         // No-op. Socket.IO handles reconnect.
+      },
+      onAuthError: (message) => {
+        setAccessKeyErrorMessage(message);
+        setError(message);
       },
       onProtocolError: (message) => {
         setError(message);
@@ -3248,7 +3634,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pageshow", onPageShow);
       disconnectSocket();
     };
-  }, [handleRealtimeMessage, unifiedWebSocketUrl]);
+  }, [handleRealtimeMessage, serverAccessKey, unifiedWebSocketUrl]);
 
   useEffect(() => {
     if (!activeRequest) {
@@ -3919,6 +4305,120 @@ export function App(): React.JSX.Element {
     [availableAgentIds, createNewThread],
   );
 
+  const renderSidebarThreadRow = useCallback(
+    (thread: Thread, colorAccent: string | null = null): React.JSX.Element => {
+      const isSelected = thread.id === selectedThreadId;
+      const threadIsGenerating =
+        Boolean(thread.isGenerating) || (isSelected && isGenerating);
+      const waitingOnApproval =
+        isSelected && selectedThreadWaitingState
+          ? selectedThreadWaitingState.waitingOnApproval
+          : Boolean(thread.waitingOnApproval);
+      const waitingOnUserInput =
+        isSelected && selectedThreadWaitingState
+          ? selectedThreadWaitingState.waitingOnUserInput
+          : Boolean(thread.waitingOnUserInput);
+      const hasWaitingIndicator = waitingOnApproval || waitingOnUserInput;
+      const archiveAction =
+        sidebarArchiveMode === "active"
+          ? {
+              label: "Archive thread",
+              archived: true,
+              icon: <Archive size={12} />,
+            }
+          : {
+              label: "Restore thread",
+              archived: false,
+              icon: <ArchiveRestore size={12} />,
+            };
+
+      return (
+        <div
+          key={thread.id}
+          className={`group/thread flex w-full min-w-0 items-stretch rounded-xl transition-colors ${
+            isSelected
+              ? "bg-muted/90 text-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+          }`}
+        >
+          <Button
+            type="button"
+            onClick={() => {
+              setSelectedThreadId(thread.id);
+              closeMobileSidebar();
+            }}
+            variant="ghost"
+            className="min-w-0 h-auto flex-1 justify-between gap-2 rounded-xl rounded-r-md px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal text-inherit hover:bg-transparent hover:text-inherit"
+          >
+            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+              {colorAccent && (
+                <span
+                  className="shrink-0 w-1 h-3.5 rounded-full"
+                  style={{ backgroundColor: colorAccent }}
+                />
+              )}
+              {showProviderIcons && (
+                <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                  <AgentFavicon
+                    agentId={thread.provider}
+                    label={agentsById[thread.provider]?.label ?? "Agent"}
+                    className="h-3.5 w-3.5"
+                  />
+                </span>
+              )}
+              <span className="truncate">{threadLabel(thread)}</span>
+            </span>
+            <span className="shrink-0 flex items-center gap-1.5">
+              <SidebarThreadWaitingIndicators
+                waitingOnApproval={waitingOnApproval}
+                waitingOnUserInput={waitingOnUserInput}
+              />
+              {!hasWaitingIndicator && threadIsGenerating && (
+                <Loader2
+                  size={11}
+                  className="animate-spin text-muted-foreground/70"
+                />
+              )}
+              {thread.updatedAt && (
+                <span className="text-[10px] text-muted-foreground/50">
+                  {formatCompactRelativeTime(thread.updatedAt)}
+                </span>
+              )}
+            </span>
+          </Button>
+          {archiveAction && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={isBusy}
+              title={archiveAction.label}
+              aria-label={archiveAction.label}
+              onClick={(event) => {
+                event.stopPropagation();
+                void runSetThreadArchived(thread, archiveAction.archived);
+              }}
+              className="h-auto w-7 shrink-0 rounded-xl rounded-l-md text-muted-foreground/45 opacity-70 hover:bg-muted/80 hover:text-foreground group-hover/thread:opacity-100"
+            >
+              {archiveAction.icon}
+            </Button>
+          )}
+        </div>
+      );
+    },
+    [
+      agentsById,
+      closeMobileSidebar,
+      isBusy,
+      isGenerating,
+      runSetThreadArchived,
+      selectedThreadId,
+      selectedThreadWaitingState,
+      showProviderIcons,
+      sidebarArchiveMode,
+    ],
+  );
+
   const beginOpenSidebarSwipe = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
       if (mobileSidebarOpen) {
@@ -4050,9 +4550,33 @@ export function App(): React.JSX.Element {
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 -bottom-3 bg-gradient-to-b from-sidebar from-58% via-sidebar/88 via-80% to-transparent to-100%"
         />
-        <div className="relative z-10 flex items-center justify-between h-full">
+        <div className="relative z-10 flex items-center justify-between gap-2 h-full">
           <span className="text-sm font-semibold">Farfield</span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              type="button"
+              variant={sidebarArchiveMode === "archived" ? "secondary" : "ghost"}
+              size="sm"
+              className="h-8 rounded-lg px-2 text-xs"
+              disabled={isCoreLoading}
+              onClick={() => {
+                switchSidebarArchiveMode(
+                  sidebarArchiveMode === "archived" ? "active" : "archived",
+                );
+              }}
+              title={
+                sidebarArchiveMode === "archived"
+                  ? "Show active threads"
+                  : "Show archived threads"
+              }
+            >
+              {sidebarArchiveMode === "archived" ? (
+                <ArchiveRestore size={13} />
+              ) : (
+                <Archive size={13} />
+              )}
+              {sidebarArchiveMode === "archived" ? "Active" : "Archived"}
+            </Button>
             {viewport === "desktop" && (
               <IconBtn
                 onClick={() => setDesktopSidebarOpen(false)}
@@ -4073,9 +4597,43 @@ export function App(): React.JSX.Element {
         </div>
       </div>
 
+      <div className="relative z-20 shrink-0 px-3 pb-2">
+        <div className="relative">
+          <Search
+            size={14}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/55"
+          />
+          <Input
+            type="search"
+            value={sidebarSearchQuery}
+            onChange={(event) => setSidebarSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && sidebarSearchQuery) {
+                event.preventDefault();
+                setSidebarSearchQuery("");
+              }
+            }}
+            placeholder="Search threads"
+            aria-label="Search threads"
+            className="h-8 rounded-lg bg-background/70 pl-8 pr-8 text-xs shadow-none"
+          />
+          {sidebarSearchQuery && (
+            <button
+              type="button"
+              aria-label="Clear thread search"
+              title="Clear search"
+              className="absolute right-1.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+              onClick={() => setSidebarSearchQuery("")}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="relative flex-1 min-h-0">
         <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden py-2 pl-2 pr-0">
-          {threads.length === 0 && (
+          {visibleSidebarThreads.length === 0 && (
             <div className="px-4 py-6 text-xs text-muted-foreground text-center space-y-3">
               <div>
                 {isCoreLoading ? (
@@ -4117,12 +4675,18 @@ export function App(): React.JSX.Element {
                       </Button>
                     </div>
                   </div>
+                ) : isSidebarSearchActive ? (
+                  "No matching threads"
                 ) : (
-                  "No threads"
+                  sidebarArchiveMode === "archived"
+                    ? "No archived threads"
+                    : "No active threads"
                 )}
               </div>
               {!isCoreLoading &&
                 !sidebarProviderConnectionState &&
+                !isSidebarSearchActive &&
+                sidebarArchiveMode === "active" &&
                 availableAgentIds.length > 0 &&
                 (availableAgentIds.length === 1 ? (
                   <Button
@@ -4196,6 +4760,11 @@ export function App(): React.JSX.Element {
             </div>
           )}
           <div className="space-y-2 pr-2">
+            {groupedThreads.length > 0 && (
+              <div className="px-2 pt-1 text-[11px] font-medium text-muted-foreground/60">
+                {CODEX_PROJECT_SECTION_LABEL}
+              </div>
+            )}
             {groupedThreads.map((group) => {
               const hasSelectedThread = group.threads.some(
                 (thread) => thread.id === selectedThreadId,
@@ -4280,6 +4849,11 @@ export function App(): React.JSX.Element {
                       }
                       variant="ghost"
                       className="h-6 flex-1 justify-start gap-1.5 rounded-lg px-1.5 py-1 text-left text-[13px] tracking-tight font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      title={
+                        group.projectPaths.length > 0
+                          ? group.projectPaths.map(formatProjectPath).join("\n")
+                          : group.label
+                      }
                     >
                       {isCollapsed ? (
                         <Folder size={13} className="shrink-0" />
@@ -4435,84 +5009,26 @@ export function App(): React.JSX.Element {
                           No threads yet
                         </div>
                       )}
-                      {group.threads.map((thread) => {
-                        const isSelected = thread.id === selectedThreadId;
-                        const threadIsGenerating =
-                          Boolean(thread.isGenerating) ||
-                          (isSelected && isGenerating);
-                        const waitingOnApproval =
-                          isSelected && selectedThreadWaitingState
-                            ? selectedThreadWaitingState.waitingOnApproval
-                            : Boolean(thread.waitingOnApproval);
-                        const waitingOnUserInput =
-                          isSelected && selectedThreadWaitingState
-                            ? selectedThreadWaitingState.waitingOnUserInput
-                            : Boolean(thread.waitingOnUserInput);
-                        const hasWaitingIndicator =
-                          waitingOnApproval || waitingOnUserInput;
-                        return (
-                          <Button
-                            key={thread.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedThreadId(thread.id);
-                              closeMobileSidebar();
-                            }}
-                            variant="ghost"
-                            className={`w-full min-w-0 h-auto flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal transition-colors ${
-                              isSelected
-                                ? "bg-muted/90 text-foreground shadow-sm"
-                                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                            }`}
-                          >
-                            <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
-                              {colorAccent && (
-                                <span
-                                  className="shrink-0 w-1 h-3.5 rounded-full"
-                                  style={{ backgroundColor: colorAccent }}
-                                />
-                              )}
-                              {showProviderIcons && (
-                                <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
-                                  <AgentFavicon
-                                    agentId={thread.provider}
-                                    label={
-                                      agentsById[thread.provider]?.label ??
-                                      "Agent"
-                                    }
-                                    className="h-3.5 w-3.5"
-                                  />
-                                </span>
-                              )}
-                              <span className="truncate">
-                                {threadLabel(thread)}
-                              </span>
-                            </span>
-                            <span className="shrink-0 flex items-center gap-1.5">
-                              <SidebarThreadWaitingIndicators
-                                waitingOnApproval={waitingOnApproval}
-                                waitingOnUserInput={waitingOnUserInput}
-                              />
-                              {!hasWaitingIndicator && threadIsGenerating && (
-                                <Loader2
-                                  size={11}
-                                  className="animate-spin text-muted-foreground/70"
-                                />
-                              )}
-                              {thread.updatedAt && (
-                                <span className="text-[10px] text-muted-foreground/50">
-                                  {formatCompactRelativeTime(thread.updatedAt)}
-                                </span>
-                              )}
-                            </span>
-                          </Button>
-                        );
-                      })}
+                      {group.threads.map((thread) =>
+                        renderSidebarThreadRow(thread, colorAccent),
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+            {conversationThreads.length > 0 && (
+              <div className="space-y-1 pt-2">
+                <div className="px-2 text-[11px] font-medium text-muted-foreground/60">
+                  {CODEX_PROJECTLESS_SECTION_LABEL}
+                </div>
+                <div className="space-y-1 pl-5 pt-0.5">
+                  {conversationThreads.map((thread) =>
+                    renderSidebarThreadRow(thread, null),
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4790,6 +5306,71 @@ export function App(): React.JSX.Element {
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0">
+              {serverAccessKey && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="mr-0.5 inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title="Access key saved"
+                    >
+                      <KeyRound size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="end">
+                    Access key saved for this server
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {selectedThreadProjectPath && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                      title="Project worktree"
+                    >
+                      <GitBranch size={14} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={6}
+                    className="w-72 max-w-[calc(100vw-2rem)]"
+                  >
+                    <div className="space-y-2 p-2.5 text-xs">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Project
+                        </div>
+                        <div className="truncate text-sm font-medium">
+                          {basenameFromPath(selectedThreadProjectPath)}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] leading-4 break-all text-muted-foreground">
+                        {formatProjectPath(selectedThreadProjectPath)}
+                      </div>
+                      {selectedThreadWorktreeInfo ? (
+                        <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-2 py-1.5">
+                          <span className="text-muted-foreground">
+                            Codex worktree
+                          </span>
+                          <span className="font-mono text-[11px]">
+                            {selectedThreadWorktreeInfo.id}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-border/70 px-2 py-1.5 text-muted-foreground">
+                          Main project directory
+                        </div>
+                      )}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {showUsageBadges && rateLimits && (() => {
                 const windows: Array<{
                   label: string;
@@ -4945,7 +5526,53 @@ export function App(): React.JSX.Element {
           >
             {/* Error bar */}
             <AnimatePresence>
-              {error && (
+              {showAccessKeyPrompt && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden shrink-0"
+                >
+                  <div className="flex flex-col gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100 sm:flex-row sm:items-center">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <KeyRound size={15} className="shrink-0" />
+                      <span className="truncate">
+                        {accessKeyErrorMessage || "Access key required"}
+                      </span>
+                    </div>
+                    <div className="flex min-w-0 gap-2">
+                      <Input
+                        type="password"
+                        value={serverAccessKeyDraft}
+                        onChange={(event) =>
+                          setServerAccessKeyDraft(event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveAccessKeyAndRetry();
+                          }
+                        }}
+                        placeholder="Access key"
+                        className="h-8 min-w-0 flex-1 bg-background/90 text-sm text-foreground sm:w-56"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          void saveAccessKeyAndRetry();
+                        }}
+                        variant="outline"
+                        className="h-8 shrink-0 bg-background/90 text-xs"
+                      >
+                        Unlock
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {error && error !== accessKeyErrorMessage && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
@@ -5452,6 +6079,72 @@ export function App(): React.JSX.Element {
               </div>
 
               <div className="p-4 space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label className="text-sm font-medium">Profiles</Label>
+                      <div className="text-xs text-muted-foreground">
+                        Save one server per Mac and switch without changing browsers.
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate max-w-[12rem]">
+                      Active: {activeServerLabel}
+                    </div>
+                  </div>
+
+                  {serverProfiles.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {serverProfiles.map((profile) => {
+                        const isActive = profile.baseUrl === serverBaseUrl;
+                        return (
+                          <div
+                            key={profile.id}
+                            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                              isActive
+                                ? "border-primary/60 bg-primary/5"
+                                : "border-border bg-muted/20"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left"
+                              onClick={() => {
+                                void applyServerProfile(profile);
+                              }}
+                            >
+                              <div className="truncate text-sm font-medium">
+                                {profile.name}
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground">
+                                {profile.baseUrl}
+                              </div>
+                            </button>
+                            {isActive && (
+                              <span className="rounded-full bg-success/12 px-2 py-0.5 text-[11px] text-success">
+                                Active
+                              </span>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              onClick={() => deleteServerProfile(profile.id)}
+                              title={`Delete ${profile.name}`}
+                            >
+                              <X size={13} />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                      No saved profiles yet.
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Server</Label>
                   <div className="text-xs text-muted-foreground">
@@ -5471,7 +6164,45 @@ export function App(): React.JSX.Element {
                   />
                 </div>
 
-                <div className="flex gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">Access key</Label>
+                  <div className="text-xs text-muted-foreground">
+                    Required only when the server has FARFIELD_ACCESS_KEY set.
+                  </div>
+                  <Input
+                    type="password"
+                    value={serverAccessKeyDraft}
+                    onChange={(e) => setServerAccessKeyDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveServerTarget();
+                      }
+                    }}
+                    placeholder="Leave empty if this server has no key"
+                    className="h-9 text-sm"
+                  />
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <Input
+                    value={serverProfileNameDraft}
+                    onChange={(e) => setServerProfileNameDraft(e.target.value)}
+                    placeholder="Profile name, e.g. MacBook Pro"
+                    className="h-9 text-sm"
+                  />
+                  <Button
+                    type="button"
+                    onClick={saveCurrentServerProfile}
+                    variant="outline"
+                    className="h-9 text-xs"
+                    disabled={serverBaseUrlDraft.trim().length === 0}
+                  >
+                    Save profile
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
                     onClick={() => {
@@ -5481,7 +6212,7 @@ export function App(): React.JSX.Element {
                     className="h-8 text-xs"
                     disabled={
                       serverBaseUrlDraft.trim().length === 0 ||
-                      !hasServerBaseUrlDraftChanges
+                      !hasServerConnectionDraftChanges
                     }
                   >
                     Save

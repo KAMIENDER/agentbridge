@@ -18,9 +18,11 @@ export interface UnifiedRealtimeSocket {
 
 export function createUnifiedRealtimeSocket(input: {
   socketUrl: string;
+  accessKey?: string;
   onMessage: (message: UnifiedRealtimeServerMessage) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
+  onAuthError?: (message: string) => void;
   onProtocolError?: (message: string) => void;
 }): UnifiedRealtimeSocket {
   const parsedSocketUrl = new URL(input.socketUrl);
@@ -33,6 +35,7 @@ export function createUnifiedRealtimeSocket(input: {
       reconnection: true,
       reconnectionDelay: 1_000,
       reconnectionDelayMax: 10_000,
+      ...(input.accessKey ? { auth: { accessKey: input.accessKey } } : {}),
     },
   );
 
@@ -42,6 +45,19 @@ export function createUnifiedRealtimeSocket(input: {
 
   socket.on("disconnect", () => {
     input.onDisconnect?.();
+  });
+
+  socket.on("connect_error", (error) => {
+    if (
+      error.message === "accessKeyRequired" ||
+      error.message === "accessKeyInvalid"
+    ) {
+      input.onAuthError?.(
+        error.message === "accessKeyRequired"
+          ? "Access key required"
+          : "Invalid access key",
+      );
+    }
   });
 
   socket.on(REALTIME_SERVER_EVENT, (payload: JsonValue) => {

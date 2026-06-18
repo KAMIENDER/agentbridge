@@ -39,10 +39,14 @@ import {
   type UserInputResponsePayload,
   type UserInputRequestId,
 } from "@farfield/protocol";
+import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { logger } from "../../logger.js";
 import type {
   AgentAdapter,
+  AgentArchiveThreadInput,
   AgentCapabilities,
   AgentCreateThreadInput,
   AgentCreateThreadResult,
@@ -135,6 +139,19 @@ const APP_SERVER_THREAD_REFRESH_DEBOUNCE_MS = 120;
 const IPC_THREAD_REFRESH_DEBOUNCE_MS = 1_500;
 const THREAD_REFRESH_RETRY_DELAY_MS = 600;
 const CONNECTION_CHECK_MIN_INTERVAL_MS = 2_000;
+const SESSION_INDEX_PATH = join(homedir(), ".codex", "session_index.jsonl");
+
+const SessionIndexEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    thread_name: z.string(),
+  })
+  .passthrough();
+
+interface SessionIndexCache {
+  mtimeMs: number;
+  titlesByThreadId: Map<string, string>;
+}
 
 type ThreadActionRoute =
   | {
@@ -200,6 +217,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   >();
   private readonly streamPatchSyncDisabledThreadIds = new Set<string>();
   private readonly threadTitleById = new Map<string, string | null>();
+  private sessionIndexCache: SessionIndexCache | null = null;
   private readonly canonicalThreadStateErrorById = new Map<
     string,
     AgentThreadLiveState["liveStateError"]
@@ -484,8 +502,14 @@ export class CodexAgentAdapter implements AgentAdapter {
           ),
     );
 
+    const indexedTitles = await this.readSessionIndexTitles();
     const data = result.data.map((thread) => {
-      const title = this.resolveThreadTitle(thread.id, thread.title);
+      const directTitle = getThreadListItemTitle(thread);
+      const title = this.resolveThreadTitle(
+        thread.id,
+        directTitle,
+        indexedTitles.get(thread.id),
+      );
       const snapshot = this.canonicalThreadStateById.get(thread.id);
       const isGenerating = snapshot
         ? isThreadStateGenerating(snapshot)
@@ -558,7 +582,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         ephemeral: input.ephemeral ?? false,
       }),
     );
-    this.setThreadTitle(result.thread.id, result.thread.title);
+    this.setThreadTitle(result.thread.id, getThreadListItemTitle(result.thread));
 
     return {
       threadId: result.thread.id,
@@ -797,6 +821,22 @@ export class CodexAgentAdapter implements AgentAdapter {
       await this.appClient.interruptTurn(input.threadId, activeTurnId);
     };
     await this.runThreadOperationWithResumeRetry(input.threadId, interruptTurn);
+  }
+
+  public async archiveThread(input: AgentArchiveThreadInput): Promise<void> {
+    this.ensureCodexAvailable();
+    await this.runAppServerCall(() =>
+      this.appClient.archiveThread({ threadId: input.threadId }),
+    );
+    this.notifyThreadStateChanged(input.threadId);
+  }
+
+  public async unarchiveThread(input: AgentArchiveThreadInput): Promise<void> {
+    this.ensureCodexAvailable();
+    await this.runAppServerCall(() =>
+      this.appClient.unarchiveThread({ threadId: input.threadId }),
+    );
+    this.notifyThreadStateChanged(input.threadId);
   }
 
   public async listModels(limit: number) {
@@ -2764,9 +2804,14 @@ export class CodexAgentAdapter implements AgentAdapter {
   private resolveThreadTitle(
     threadId: string,
     directTitle: string | null | undefined,
+    indexedTitle: string | undefined,
   ): string | null | undefined {
     if (directTitle !== undefined) {
       return directTitle;
+    }
+
+    if (indexedTitle !== undefined) {
+      return indexedTitle;
     }
 
     if (this.threadTitleById.has(threadId)) {
@@ -2779,6 +2824,53 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     return snapshot.title;
+  }
+
+  private async readSessionIndexTitles(): Promise<Map<string, string>> {
+    let stats: Awaited<ReturnType<typeof stat>>;
+    try {
+      stats = await stat(SESSION_INDEX_PATH);
+    } catch {
+      return new Map();
+    }
+
+    if (
+      this.sessionIndexCache &&
+      this.sessionIndexCache.mtimeMs === stats.mtimeMs
+    ) {
+      return this.sessionIndexCache.titlesByThreadId;
+    }
+
+    const titlesByThreadId = new Map<string, string>();
+    try {
+      const content = await readFile(SESSION_INDEX_PATH, "utf8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        const parsed = SessionIndexEntrySchema.safeParse(JSON.parse(trimmed));
+        if (!parsed.success) {
+          continue;
+        }
+        const title = parsed.data.thread_name.trim();
+        if (!title) {
+          continue;
+        }
+        titlesByThreadId.set(parsed.data.id, title);
+      }
+    } catch (error) {
+      logger.debug(
+        { error: toErrorMessage(error) },
+        "codex-session-index-title-read-failed",
+      );
+    }
+
+    this.sessionIndexCache = {
+      mtimeMs: stats.mtimeMs,
+      titlesByThreadId,
+    };
+    return titlesByThreadId;
   }
 
   private setThreadTitle(
@@ -2813,6 +2905,25 @@ function toErrorMessage(error: Error | string | unknown): string {
     return error;
   }
   return String(error);
+}
+
+function getThreadListItemTitle(thread: unknown): string | null | undefined {
+  if (!thread || typeof thread !== "object") {
+    return undefined;
+  }
+
+  const record = thread as Record<string, unknown>;
+  const title = record["title"];
+  if (title === null || typeof title === "string") {
+    return title;
+  }
+
+  const name = record["name"];
+  if (name === null || typeof name === "string") {
+    return name;
+  }
+
+  return undefined;
 }
 
 const INVALID_REQUEST_ERROR_CODE = -32600;

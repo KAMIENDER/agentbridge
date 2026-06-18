@@ -1390,7 +1390,11 @@ function mapTurnItem(
         ...(typeof item.willRetry === "boolean"
           ? { willRetry: item.willRetry }
           : {}),
-        ...(item.errorInfo !== undefined ? { errorInfo: item.errorInfo } : {}),
+        ...(item.errorInfo !== undefined
+          ? {
+              errorInfo: jsonValueFromString(JSON.stringify(item.errorInfo)),
+            }
+          : {}),
         ...(item.additionalDetails !== undefined
           ? {
               additionalDetails: jsonValueFromString(
