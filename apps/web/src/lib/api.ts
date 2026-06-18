@@ -24,8 +24,8 @@ import {
   type UnifiedThread,
   type UnifiedThreadRequestResponse,
   type UnifiedUserInputRequest,
-} from "@farfield/unified-surface";
-import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol";
+} from "@agentbridge/unified-surface";
+import { AppServerGetAccountRateLimitsResponseSchema } from "@agentbridge/protocol";
 import { z } from "zod";
 import {
   buildServerUrl,
@@ -503,6 +503,7 @@ async function requestJson(
   const headers = new Headers(init?.headers);
   const accessKey = readStoredServerAccessKey();
   if (accessKey) {
+    headers.set("X-AgentBridge-Access-Key", accessKey);
     headers.set("X-Farfield-Access-Key", accessKey);
   }
   const response = await fetch(buildServerUrl(path), {
@@ -568,6 +569,14 @@ function notifyAccessKeyError(error: ApiRequestError): void {
   if (typeof window === "undefined") {
     return;
   }
+  window.dispatchEvent(
+    new CustomEvent("agentbridge:access-key-error", {
+      detail: {
+        code: error.code,
+        message: error.message,
+      },
+    }),
+  );
   window.dispatchEvent(
     new CustomEvent("farfield:access-key-error", {
       detail: {

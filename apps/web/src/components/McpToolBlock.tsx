@@ -7,7 +7,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { z } from "zod";
-import type { UnifiedItem } from "@farfield/unified-surface";
+import type { UnifiedItem } from "@agentbridge/unified-surface";
 import { formatDurationSeconds } from "@/lib/tool-call-ui";
 import {
   ToolCallDetailCode,

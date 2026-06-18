@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ThreadConversationState } from "@farfield/protocol";
+import type { ThreadConversationState } from "@agentbridge/protocol";
 import { CodexMonitorService } from "../src/service.js";
 
 function createThread(): ThreadConversationState {

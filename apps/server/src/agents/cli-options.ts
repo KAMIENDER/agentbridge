@@ -67,9 +67,9 @@ function parseAgentsArg(raw: string): AgentId[] {
 
 export function formatServerHelpText(): string {
   return [
-    "Farfield server",
+    "AgentBridge server",
     "",
-    "Usage: farfield-server [--agents=<ids>]",
+    "Usage: agentbridge-server [--agents=<ids>]",
     "",
     "Flags:",
     "  --agents=<ids>   Comma-separated agent ids. Allowed: codex, opencode, all",

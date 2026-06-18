@@ -6,7 +6,7 @@ import {
   DesktopIpcError,
   DesktopIpcClient,
   type SendRequestOptions,
-} from "@farfield/api";
+} from "@agentbridge/api";
 import {
   type AppServerServerNotification,
   type AppServerServerRequest,
@@ -38,7 +38,7 @@ import {
   type ThreadStreamStateChangedBroadcast,
   type UserInputResponsePayload,
   type UserInputRequestId,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -850,7 +850,7 @@ export class CodexAgentAdapter implements AgentAdapter {
   }
 
   public async readRateLimits(): Promise<
-    import("@farfield/protocol").AppServerGetAccountRateLimitsResponse
+    import("@agentbridge/protocol").AppServerGetAccountRateLimitsResponse
   > {
     this.ensureCodexAvailable();
     return this.runAppServerCall(() => this.appClient.readAccountRateLimits());
@@ -902,7 +902,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
     return {
       ownerClientId:
-        route.kind === "desktop-owner" ? route.ownerClientId : "farfield",
+        route.kind === "desktop-owner" ? route.ownerClientId : "agentbridge",
     };
   }
 
@@ -2359,7 +2359,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     }
 
     try {
-      const event = buildSyntheticSnapshotEvent(threadId, "farfield", thread);
+      const event = buildSyntheticSnapshotEvent(threadId, "agentbridge", thread);
       this.replayBroadcast("thread-stream-state-changed", event.params, {
         targetClientId,
         version: event.version,

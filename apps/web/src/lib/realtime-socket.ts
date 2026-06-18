@@ -4,7 +4,7 @@ import {
   type JsonValue,
   type UnifiedRealtimeClientMessage,
   type UnifiedRealtimeServerMessage,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import { io, type Socket } from "socket.io-client";
 
 const REALTIME_CLIENT_EVENT = "unified-realtime-client-message";

@@ -82,10 +82,10 @@ function runBuild(filter) {
 const args = parseArgs(process.argv.slice(2));
 
 const buildFilters = [
-  "@farfield/protocol",
-  "@farfield/unified-surface",
-  "@farfield/api",
-  "@farfield/opencode-api"
+  "@agentbridge/protocol",
+  "@agentbridge/unified-surface",
+  "@agentbridge/api",
+  "@agentbridge/opencode-api"
 ];
 for (const filter of buildFilters) {
   const status = runBuild(filter);
@@ -100,7 +100,7 @@ if (args.agents.trim().length > 0) {
   serverArgs.push(`--agents=${args.agents.trim()}`);
 }
 
-const serverCommand = ["run", "--filter", "@farfield/server", devScript];
+const serverCommand = ["run", "--filter", "@agentbridge/server", devScript];
 if (serverArgs.length > 0) {
   serverCommand.push("--", ...serverArgs);
 }
@@ -112,7 +112,7 @@ const serverProcess = spawn(bunBinary, serverCommand, {
 
 const webProcess = spawn(
   bunBinary,
-  ["run", "--filter", "@farfield/web", devScript],
+  ["run", "--filter", "@agentbridge/web", devScript],
   {
     stdio: "inherit",
     env: process.env

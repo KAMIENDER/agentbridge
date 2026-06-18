@@ -8,4 +8,4 @@ declare module "virtual:pwa-register" {
   }): (reloadPage?: boolean) => Promise<void>;
 }
 
-declare const __FARFIELD_DISABLE_RATE_LIMITS__: boolean;
+declare const __AGENTBRIDGE_DISABLE_RATE_LIMITS__: boolean;

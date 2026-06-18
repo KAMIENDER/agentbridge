@@ -9,7 +9,7 @@ import type {
   IpcFrame,
   UserInputRequestId,
   UserInputResponsePayload,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 
 export type AgentId = "codex" | "opencode";
 

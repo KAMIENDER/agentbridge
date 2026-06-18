@@ -59,7 +59,7 @@ function snapshotDirectory(directory) {
 function runGenerator() {
   const result = spawnSync(
     bunBinary,
-    ["run", "--filter", "@farfield/protocol", "generate:app-server-zod"],
+    ["run", "--filter", "@agentbridge/protocol", "generate:app-server-zod"],
     {
       cwd: repoRoot,
       stdio: "inherit",

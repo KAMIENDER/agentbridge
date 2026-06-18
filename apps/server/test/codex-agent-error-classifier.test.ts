@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AppServerRpcError, DesktopIpcError } from "@farfield/api";
+import { AppServerRpcError, DesktopIpcError } from "@agentbridge/api";
 import {
   isInvalidRequestAppServerRpcError,
   isIpcNoClientFoundError,

@@ -3,8 +3,8 @@ import type {
   AppServerClientRequestMethod,
   AppServerServerNotificationMethod,
   AppServerServerRequestMethod
-} from "@farfield/protocol";
-import type { UnifiedCommandKind, UnifiedEventKind } from "@farfield/unified-surface";
+} from "@agentbridge/protocol";
+import type { UnifiedCommandKind, UnifiedEventKind } from "@agentbridge/unified-surface";
 
 export type CodexClientMethodMapping =
   | {

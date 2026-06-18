@@ -18,8 +18,8 @@ import {
   parseUserInputResponsePayload,
   type UserInputRequestId,
   type UserInputResponsePayload
-} from "@farfield/protocol";
-import { ProtocolValidationError } from "@farfield/protocol";
+} from "@agentbridge/protocol";
+import { ProtocolValidationError } from "@agentbridge/protocol";
 import { z } from "zod";
 import {
   AppServerTransport,

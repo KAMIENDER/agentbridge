@@ -5,14 +5,14 @@ import {
   type OpenCodeEventType,
   OpenCodeConnection,
   OpenCodeMonitorService,
-} from "@farfield/opencode-api";
+} from "@agentbridge/opencode-api";
 import type { Event as OpenCodeSdkEvent } from "@opencode-ai/sdk";
 import {
   AppServerCollaborationModeListResponseSchema,
   AppServerListModelsResponseSchema,
   AppServerThreadListItemSchema,
   parseThreadConversationState,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import type {
   AgentAdapter,
   AgentCapabilities,

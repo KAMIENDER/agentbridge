@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadStreamStateChangedBroadcast } from "@farfield/protocol";
+import { parseThreadStreamStateChangedBroadcast } from "@agentbridge/protocol";
 import { reduceThreadStreamEvents, ThreadStreamReductionError } from "../src/live-state.js";
 
 describe("live-state reducer", () => {

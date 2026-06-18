@@ -8,7 +8,7 @@ import {
   type FileChangeRequestApprovalResponse,
   type ToolRequestUserInputResponsePayload,
   type UserInputRequestId,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import type { DesktopIpcClient } from "./ipc-client.js";
 
 export interface SendMessageInput {

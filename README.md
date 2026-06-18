@@ -1,236 +1,176 @@
-# Farfield
+# AgentBridge
 
-Remote control for AI coding agents — read conversations, send messages, switch models, and monitor agent activity from a clean web UI.
+Private remote control for local AI coding agents.
 
-Supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
+AgentBridge lets you read conversations, send messages, switch models, inspect active work, and manage threads from a phone, tablet, or another computer. It is designed for a self-hosted workflow: the server runs on your machine next to the coding agent, and the web client connects directly to that server.
 
-Built by [@anshuchimala](https://x.com/anshuchimala).
+AgentBridge currently supports Codex and OpenCode.
 
-This is an independent project and is not affiliated with, endorsed by, or sponsored by OpenAI or the OpenCode team.
+## Project Status
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/achimalap)
+AgentBridge is an independent open-source fork of [Farfield](https://github.com/achimala/farfield). The original project was created by [Anshu Chimala](https://github.com/achimala) and is licensed under MIT. This fork keeps that license and attribution while continuing development around private multi-device access.
 
-<img src="./screenshot.png" alt="Farfield screenshot" width="500" />
+This project is not affiliated with, endorsed by, or sponsored by OpenAI, Codex, OpenCode, Tailscale, or the original Farfield project.
 
 ## Features
 
-- Thread browser grouped by project
-- Chat view with model/reasoning controls
-- Plan mode toggle
-- Live agent monitoring and interrupts
-- Debug tab with full IPC history
+- Thread browser grouped by project and worktree
+- Chat view with model, reasoning, and plan-mode controls
+- Live activity updates and turn interruption
+- Archived and hidden thread views
+- Multi-Mac connection profiles stored locally in the browser
+- Optional per-server access key
+- PWA-ready frontend for phone home-screen installs
+- Tailscale-friendly HTTPS remote access
 
-## Quick start (recommended)
+## Security Model
 
-Start the Farfield server:
+AgentBridge does not route your conversations through a hosted relay. The browser talks directly to the AgentBridge server URL you configure.
 
-```bash
-npx -y @farfield/server@latest
-```
+Important constraints:
 
-or:
+- The server can read and control local coding-agent sessions on the machine where it runs.
+- Do not expose the server directly to the public internet.
+- Put remote access behind a private network such as Tailscale.
+- Set `AGENTBRIDGE_ACCESS_KEY` when the server is reachable from another device.
+- Connection profiles and access keys are stored in the current browser's `localStorage`; they are not bundled into the static web app.
 
-```bash
-bunx @farfield/server@latest
-```
+## Quick Start From Source
 
-This runs the backend on `127.0.0.1:4311` by default.
+Requirements:
 
-You can pass server flags too to customize the agents (default is only Codex):
+- Node.js 20+
+- Bun 1.2+
+- Codex or OpenCode installed locally
 
-```bash
-npx -y @farfield/server@latest -- --agents=opencode
-npx -y @farfield/server@latest -- --agents=codex,opencode
-npx -y @farfield/server@latest -- --agents=all
-```
-
-You can access the web app at [farfield.app](https://farfield.app). Tap the bottom left status dot to pull up settings.
-
-You will need to make port 4311 remotely accessible via HTTPS and give the public URL to it to the Farfield frontend. None of this routes through an external server. The app runs inside entirely in your browser and tunnels directly to the Farfield server you started above, and all of it is open-source for you to audit yourself. However, if you are ultra paranoid, you can run and host the Farfield frontend too; read on!
-
-The securest way to open the port for remote access is by putting all devices involved in a private VPN. Tailscale is a free option that works.
-
-Doing this with Tailscale is as simple as installing Tailscale on your phone, computer, etc., and running this command on the device hosting the Farfield server:
-```bash
-tailscale serve --https=443 http://127.0.0.1:4311
-```
-
-We are working on easier options. Stay tuned!
-
-## Running from source
-
-Clone the repo and do this:
+Clone and install:
 
 ```bash
+git clone https://github.com/KAMIENDER/agentbridge.git
+cd agentbridge
 bun install
+```
+
+Run the local development app:
+
+```bash
+bun run dev
+```
+
+This starts:
+
+- backend on `127.0.0.1:4311`
+- frontend on `127.0.0.1:4312`
+
+Open:
+
+```text
+http://127.0.0.1:4312
+```
+
+## Server Only
+
+Run just the server:
+
+```bash
 bun run server
 ```
 
-`bun run server` runs only the backend on `0.0.0.0:4311`.
-
-If you need to pick agent providers:
+Pick agent providers:
 
 ```bash
+bun run server -- --agents=codex
 bun run server -- --agents=opencode
 bun run server -- --agents=codex,opencode
 bun run server -- --agents=all
 ```
 
-> **Warning:** This exposes the Farfield server on your network. Only use on trusted networks. See below for how to configure Tailscale as a VPN for secure remote access.
+## Production Mode
 
-## Local development and self-hosted frontend
-
-Use this if you are working on Farfield itself, or if you want to run both frontend and backend locally.
-
-```bash
-bun install
-bun run dev
-```
-
-Opens local frontend at `http://localhost:4312`. By default `dev` does not expose the port, it's only accessible on your device.
-
-More local dev options:
-
-```bash
-bun run dev -- --agents=opencode             # OpenCode only
-bun run dev -- --agents=codex,opencode       # both
-bun run dev -- --agents=all                  # expands to codex,opencode
-bun run dev:remote                           # exposes frontend + backend on your network
-bun run dev:remote -- --agents=opencode      # remote mode with OpenCode only
-```
-
-> **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
-
-## Production Mode (No Extra Proxy)
-
-Build once and run in production mode with two commands:
+Build once and run the server and frontend preview:
 
 ```bash
 bun run build
 bun run start
 ```
 
-Open `http://127.0.0.1:4312`.
-
-By default, this is local-only:
-- backend on `127.0.0.1:4311`
-- frontend preview on `127.0.0.1:4312`
-
-If you need a custom backend origin for API proxying:
+Use a custom backend origin for the frontend proxy:
 
 ```bash
-FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
+AGENTBRIDGE_API_ORIGIN=http://127.0.0.1:4311 bun run start
 ```
 
-### React Compiler and production profiling
+`FARFIELD_API_ORIGIN` is still accepted as a legacy alias during the fork transition.
 
-Frontend build supports optional flags:
+## Remote Access With Tailscale
 
-- `REACT_COMPILER=0` disables React Compiler transform (compiler is enabled by default for `vite build`).
-- `REACT_PROFILING=1` uses React profiling build so React DevTools Profiler works in production preview.
-- `DISABLE_RATE_LIMITS=1` disables quota/rate-limit fetching and hides usage badges in the UI. Useful with custom Codex-compatible backends that do not implement account quota endpoints.
+Install Tailscale on your Mac and phone, then log both devices into the same tailnet.
 
-Example A/B commands:
+Start the AgentBridge server on the Mac:
 
 ```bash
-# default production build (compiler enabled)
-bun run --filter @farfield/web build
-
-# baseline production build (compiler disabled)
-REACT_COMPILER=0 bun run --filter @farfield/web build
-
-# production profiling build (compiler enabled)
-REACT_PROFILING=1 bun run --filter @farfield/web build
-
-# production profiling build (compiler disabled)
-REACT_PROFILING=1 REACT_COMPILER=0 bun run --filter @farfield/web build
+AGENTBRIDGE_ACCESS_KEY='replace-with-a-long-random-secret' \
+HOST=127.0.0.1 \
+PORT=4311 \
+bun run --filter @agentbridge/server dev
 ```
 
-Run two UIs side-by-side against one backend:
-
-```bash
-# backend (terminal 1)
-bun run --filter @farfield/server start
-
-# baseline UI (terminal 2, compiler disabled)
-REACT_PROFILING=1 REACT_COMPILER=0 bun run --filter @farfield/web build -- --outDir dist-baseline
-bun run --filter @farfield/web preview -- --host 127.0.0.1 --port 4312 --strictPort --outDir dist-baseline
-
-# compiler UI (terminal 3, compiler enabled by default)
-REACT_PROFILING=1 bun run --filter @farfield/web build -- --outDir dist-compiler
-bun run --filter @farfield/web preview -- --host 127.0.0.1 --port 4313 --strictPort --outDir dist-compiler
-```
-
-## Requirements
-
-- Node.js 20+
-- Bun 1.2+ (needed for source checkout workflow)
-- Codex or OpenCode installed locally
-
-## More details on Tailscale setup
-
-This is the detailed setup for the recommended model:
-
-- Hosted frontend (`https://farfield.app`)
-- Local Farfield server running on your machine
-- Secure VPN path using Tailscale
-
-You still need to run the server locally so it can talk to your coding agent.
-
-### 1) Start the Farfield server on your machine
-
-```bash
-HOST=0.0.0.0 PORT=4311 bun run --filter @farfield/server dev
-```
-
-Quick local check:
-
-```bash
-curl http://127.0.0.1:4311/api/health
-```
-
-### 2) Put Tailscale HTTPS in front of port 4311
-
-On the same machine:
+Expose the local server only inside your tailnet:
 
 ```bash
 tailscale serve --https=443 http://127.0.0.1:4311
 tailscale serve status
 ```
 
-This gives you a URL like:
+Tailscale will give you a URL like:
 
 ```text
 https://<machine>.<tailnet>.ts.net
 ```
 
-Check it from a device on your tailnet:
+Open the AgentBridge web client on your phone, go to **Settings**, and save:
+
+- server URL: `https://<machine>.<tailnet>.ts.net`
+- access key: the value from `AGENTBRIDGE_ACCESS_KEY`
+
+Repeat this for each Mac. The **Profiles** tab lets one browser switch between saved Macs.
+
+Legacy compatibility:
+
+- `FARFIELD_ACCESS_KEY` and `FARFIELD_AUTH_KEY` are still accepted.
+- `X-Farfield-Access-Key` is still accepted by the server.
+
+## Useful Commands
 
 ```bash
-curl https://<machine>.<tailnet>.ts.net/api/health
+bun run --filter @agentbridge/web typecheck
+REACT_COMPILER=0 PWA_ENABLED=1 bun run --filter @agentbridge/web build
+bun run --workspaces test
 ```
 
-### 3) Pair farfield.app to your server
+Frontend build flags:
 
-1. Visit farfield.app on your other device
-2. Click the status pill in the lower-left corner (green/red dot + commit hash) to open **Settings**.
-3. In **Server**, enter your Tailscale HTTPS URL, for example:
+- `REACT_COMPILER=0` disables React Compiler for the build.
+- `REACT_PROFILING=1` enables the React profiling build.
+- `PWA_ENABLED=0` disables service-worker generation.
+- `DISABLE_RATE_LIMITS=1` hides quota/rate-limit UI for compatible backends that do not expose those endpoints.
 
-```text
-https://<machine>.<tailnet>.ts.net
-(note: no port)
-```
+## Roadmap
 
-4. Click **Save**.
+- A first-party hosted static frontend under an AgentBridge-owned domain
+- Published npm packages under the `@agentbridge` scope
+- Clear setup scripts for macOS launchd
+- Better onboarding for multiple Macs and mobile PWA installs
+- Hardening around access-key setup and profile export/import
 
-Farfield stores this in browser storage and uses it for API calls and live event stream.
+## Contributing
 
-### Notes
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Do not use raw tailnet IPs with `https://` (for example `https://100.x.x.x:4311`) in the browser; this won't work.
-- If you use `tailscale serve --https=443`, do not include `:4311` in the URL you enter in Settings.
-- **Use automatic** in Settings clears the saved server URL and returns to built-in default behavior.
+## Security
+
+See [SECURITY.md](SECURITY.md). Please do not publish secrets, access keys, tailnet names, or machine URLs in issues.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).

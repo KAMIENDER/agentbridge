@@ -7,7 +7,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import type { UnifiedItem, UnifiedItemKind } from "@farfield/unified-surface";
+import type { UnifiedItem, UnifiedItemKind } from "@agentbridge/unified-surface";
 import { formatDurationSeconds } from "@/lib/tool-call-ui";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { CommandBlock } from "./CommandBlock";

@@ -13,7 +13,7 @@ import {
   UnifiedFeatureId,
   UnifiedItem,
   UnifiedThread,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import { App } from "../src/App";
 
 type SocketPayload = JsonValue | UnifiedRealtimeServerMessage;
@@ -772,7 +772,7 @@ vi.stubGlobal(
 describe("App", () => {
   it("renders core sections", async () => {
     render(<App />);
-    expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("AgentBridge")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
   });
 
@@ -1400,7 +1400,7 @@ describe("App", () => {
     };
 
     render(<App />);
-    await screen.findAllByText("Farfield");
+    await screen.findAllByText("AgentBridge");
     expect(screen.queryByText("Plan")).toBeNull();
   });
 

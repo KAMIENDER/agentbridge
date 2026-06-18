@@ -1,6 +1,6 @@
 # Cloudflare Pages Deploy
 
-Farfield's hosted web frontend is a static Vite build deployed to Cloudflare Pages.
+AgentBridge's hosted web frontend is a static Vite build that can be deployed to Cloudflare Pages.
 
 ## Production Flow
 
@@ -12,12 +12,12 @@ The workflow:
 2. Builds the local workspace packages that the web app imports.
 3. Typechecks the web app.
 4. Runs the web tests.
-5. Builds `@farfield/web`.
+5. Builds `@agentbridge/web`.
 6. Uploads `apps/web/dist` to Cloudflare Pages with Wrangler.
 
 ## Cloudflare Setup
 
-Create a Cloudflare Pages project named `farfield`, or set the GitHub repository variable `CLOUDFLARE_PAGES_PROJECT_NAME` to the existing Pages project name.
+Create a Cloudflare Pages project named `agentbridge`, or set the GitHub repository variable `CLOUDFLARE_PAGES_PROJECT_NAME` to the existing Pages project name.
 
 Set the Pages project's production branch to `main`.
 
@@ -28,12 +28,12 @@ Add these GitHub Actions secrets:
 
 The API token needs Cloudflare Pages edit access for the account.
 
-Attach `farfield.app` to the Pages project in Cloudflare:
+Attach your chosen custom domain to the Pages project in Cloudflare:
 
 1. Open Cloudflare dashboard.
 2. Go to Workers & Pages.
-3. Select the Farfield Pages project.
+3. Select the AgentBridge Pages project.
 4. Open Custom domains.
-5. Add `farfield.app`.
+5. Add the custom domain.
 
 Cloudflare requires the custom domain to be attached to the Pages project. DNS alone is not enough.

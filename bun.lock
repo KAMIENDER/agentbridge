@@ -13,7 +13,7 @@
       },
     },
     "apps/server": {
-      "name": "@farfield/server",
+      "name": "@agentbridge/server",
       "version": "0.2.4",
       "bin": "./dist/cli.js",
       "dependencies": {
@@ -23,20 +23,20 @@
         "zod": "^3.24.1",
       },
       "devDependencies": {
-        "@farfield/api": "workspace:*",
-        "@farfield/opencode-api": "workspace:*",
-        "@farfield/protocol": "workspace:*",
-        "@farfield/unified-surface": "workspace:*",
+        "@agentbridge/api": "workspace:*",
+        "@agentbridge/opencode-api": "workspace:*",
+        "@agentbridge/protocol": "workspace:*",
+        "@agentbridge/unified-surface": "workspace:*",
         "esbuild": "^0.25.10",
         "socket.io-client": "^4.8.1",
       },
     },
     "apps/web": {
-      "name": "@farfield/web",
+      "name": "@agentbridge/web",
       "version": "0.0.0",
       "dependencies": {
-        "@farfield/protocol": "workspace:*",
-        "@farfield/unified-surface": "workspace:*",
+        "@agentbridge/protocol": "workspace:*",
+        "@agentbridge/unified-surface": "workspace:*",
         "@radix-ui/react-checkbox": "^1.3.3",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
         "@radix-ui/react-label": "^2.1.8",
@@ -78,16 +78,16 @@
       },
     },
     "packages/codex-api": {
-      "name": "@farfield/api",
+      "name": "@agentbridge/api",
       "version": "0.0.0",
       "dependencies": {
-        "@farfield/protocol": "workspace:*",
-        "@farfield/unified-surface": "workspace:*",
+        "@agentbridge/protocol": "workspace:*",
+        "@agentbridge/unified-surface": "workspace:*",
         "zod": "^3.24.1",
       },
     },
     "packages/codex-protocol": {
-      "name": "@farfield/protocol",
+      "name": "@agentbridge/protocol",
       "version": "0.0.0",
       "dependencies": {
         "zod": "^3.24.1",
@@ -98,7 +98,7 @@
       },
     },
     "packages/opencode-api": {
-      "name": "@farfield/opencode-api",
+      "name": "@agentbridge/opencode-api",
       "version": "0.0.0",
       "dependencies": {
         "@opencode-ai/sdk": "^1.2.6",
@@ -106,7 +106,7 @@
       },
     },
     "packages/unified-surface": {
-      "name": "@farfield/unified-surface",
+      "name": "@agentbridge/unified-surface",
       "version": "0.0.0",
       "dependencies": {
         "zod": "^3.24.1",
@@ -380,17 +380,17 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
 
-    "@farfield/api": ["@farfield/api@workspace:packages/codex-api"],
+    "@agentbridge/api": ["@agentbridge/api@workspace:packages/codex-api"],
 
-    "@farfield/opencode-api": ["@farfield/opencode-api@workspace:packages/opencode-api"],
+    "@agentbridge/opencode-api": ["@agentbridge/opencode-api@workspace:packages/opencode-api"],
 
-    "@farfield/protocol": ["@farfield/protocol@workspace:packages/codex-protocol"],
+    "@agentbridge/protocol": ["@agentbridge/protocol@workspace:packages/codex-protocol"],
 
-    "@farfield/server": ["@farfield/server@workspace:apps/server"],
+    "@agentbridge/server": ["@agentbridge/server@workspace:apps/server"],
 
-    "@farfield/unified-surface": ["@farfield/unified-surface@workspace:packages/unified-surface"],
+    "@agentbridge/unified-surface": ["@agentbridge/unified-surface@workspace:packages/unified-surface"],
 
-    "@farfield/web": ["@farfield/web@workspace:apps/web"],
+    "@agentbridge/web": ["@agentbridge/web@workspace:apps/web"],
 
     "@floating-ui/core": ["@floating-ui/core@1.7.4", "", { "dependencies": { "@floating-ui/utils": "^0.2.10" } }, "sha512-C3HlIdsBxszvm5McXlB8PeOEWfBhcGBTZGkGlWc2U0KFY5IwG5OQEuQ8rq52DZmcHDlPLd+YFBK+cZcytwIFWg=="],
 

@@ -3,7 +3,7 @@ import {
   JsonValueSchema,
   ProtocolValidationError,
   RequestIdSchema
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 
 export const JsonRpcRequestSchema = z
   .object({

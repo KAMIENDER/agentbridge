@@ -7,9 +7,9 @@ import { spawnSync } from "node:child_process";
 const repoRoot = process.cwd();
 
 const bannedImportPrefixes = [
-  "@farfield/api",
-  "@farfield/codex-api",
-  "@farfield/opencode-api",
+  "@agentbridge/api",
+  "@agentbridge/codex-api",
+  "@agentbridge/opencode-api",
   "@opencode-ai/sdk"
 ];
 

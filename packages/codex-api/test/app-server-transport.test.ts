@@ -41,7 +41,7 @@ function createFakeAppServer(): {
   executablePath: string;
   recordsPath: string;
 } {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "farfield-app-server-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentbridge-app-server-"));
   tempDirectories.push(tempDir);
 
   const scriptPath = path.join(tempDir, "fake-codex.mjs");
@@ -196,7 +196,7 @@ describe("ChildProcessAppServerTransport", () => {
 
       const transport = new ChildProcessAppServerTransport({
         executablePath,
-        userAgent: "farfield-test",
+        userAgent: "agentbridge-test",
         env: {
           FAKE_APP_SERVER_RECORDS: recordsPath,
         },
@@ -227,7 +227,7 @@ describe("ChildProcessAppServerTransport", () => {
         method: "initialize",
         params: {
           clientInfo: {
-            name: "farfield",
+            name: "agentbridge",
             version: "0.2.0",
           },
         },
@@ -267,7 +267,7 @@ describe("ChildProcessAppServerTransport", () => {
 
     const transport = new ChildProcessAppServerTransport({
       executablePath,
-      userAgent: "farfield-test",
+      userAgent: "agentbridge-test",
       env: {
         FAKE_APP_SERVER_RECORDS: recordsPath,
       },
@@ -296,7 +296,7 @@ describe("ChildProcessAppServerTransport", () => {
 
     const transport = new ChildProcessAppServerTransport({
       executablePath,
-      userAgent: "farfield-test",
+      userAgent: "agentbridge-test",
       env: {
         FAKE_APP_SERVER_RECORDS: recordsPath,
       },

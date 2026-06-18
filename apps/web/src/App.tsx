@@ -98,7 +98,7 @@ import {
   type UnifiedThreadRequestResponse,
   type UnifiedFeatureAvailability,
   type UnifiedFeatureId,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
 import { ChatTimeline, type ChatTimelineEntry } from "@/components/ChatTimeline";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -130,7 +130,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AppServerGetAccountRateLimitsResponseSchema } from "@farfield/protocol";
+import { AppServerGetAccountRateLimitsResponseSchema } from "@agentbridge/protocol";
 import { z } from "zod";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -807,7 +807,7 @@ const ASSUMED_APP_DEFAULT_EFFORT = "medium";
 const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
-const DISABLE_RATE_LIMITS = __FARFIELD_DISABLE_RATE_LIMITS__;
+const DISABLE_RATE_LIMITS = __AGENTBRIDGE_DISABLE_RATE_LIMITS__;
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
 const MOBILE_SIDEBAR_TOGGLE_THRESHOLD_PX = 88;
@@ -3566,9 +3566,12 @@ export function App(): React.JSX.Element {
       setError(message);
     };
 
-    window.addEventListener("farfield:access-key-error", onAccessKeyError);
+    window.addEventListener("agentbridge:access-key-error", onAccessKeyError);
     return () => {
-      window.removeEventListener("farfield:access-key-error", onAccessKeyError);
+      window.removeEventListener(
+        "agentbridge:access-key-error",
+        onAccessKeyError,
+      );
     };
   }, []);
 
@@ -4554,7 +4557,7 @@ export function App(): React.JSX.Element {
           className="pointer-events-none absolute inset-x-0 top-0 -bottom-3 bg-gradient-to-b from-sidebar from-58% via-sidebar/88 via-80% to-transparent to-100%"
         />
         <div className="relative z-10 flex items-center justify-between gap-2 h-full">
-          <span className="text-sm font-semibold">Farfield</span>
+          <span className="text-sm font-semibold">AgentBridge</span>
           <div className="flex items-center gap-1 shrink-0">
             <Button
               type="button"
@@ -5168,7 +5171,7 @@ export function App(): React.JSX.Element {
             <Tooltip>
               <TooltipTrigger asChild>
                 <a
-                  href="https://github.com/achimala/farfield"
+                  href="https://github.com/KAMIENDER/agentbridge"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="h-8 w-8 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
@@ -6074,7 +6077,7 @@ export function App(): React.JSX.Element {
                   <div>
                     <div className="text-base font-semibold">Settings</div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Farfield connection preferences
+                      AgentBridge connection preferences
                     </div>
                   </div>
                   <Button

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { parseServerBaseUrl } from "@/lib/server-target";
 
-const STORAGE_KEY = "farfield.server-profiles.v1";
+const STORAGE_KEY = "agentbridge.server-profiles.v1";
+const LEGACY_STORAGE_KEY = "farfield.server-profiles.v1";
 
 const ServerProfileSchema = z
   .object({
@@ -47,7 +48,9 @@ export function readServerProfiles(): ServerProfile[] {
   if (typeof window === "undefined") {
     return [];
   }
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw =
+    window.localStorage.getItem(STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_STORAGE_KEY);
   if (!raw) {
     return [];
   }
@@ -61,6 +64,7 @@ export function readServerProfiles(): ServerProfile[] {
 function writeServerProfiles(profiles: ServerProfile[]): ServerProfile[] {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+    window.localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(profiles));
   }
   return profiles;
 }

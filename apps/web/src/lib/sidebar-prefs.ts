@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-const STORAGE_PREFIX = "farfield.sidebar";
+const STORAGE_PREFIX = "agentbridge.sidebar";
+const LEGACY_STORAGE_PREFIX = "farfield.sidebar";
 
 const SidebarOrderSchema = z.array(z.string());
 const SidebarCollapseMapSchema = z.record(z.string(), z.boolean());
@@ -17,7 +18,9 @@ const ProjectColorMapSchema = z.record(z.string(), z.enum(GROUP_COLORS));
 
 function readStorage<T>(key: string, schema: z.ZodType<T>, defaultValue: T): T {
   try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}.${key}`);
+    const raw =
+      localStorage.getItem(`${STORAGE_PREFIX}.${key}`) ??
+      localStorage.getItem(`${LEGACY_STORAGE_PREFIX}.${key}`);
     if (!raw) return defaultValue;
     return schema.parse(JSON.parse(raw));
   } catch {
@@ -28,6 +31,10 @@ function readStorage<T>(key: string, schema: z.ZodType<T>, defaultValue: T): T {
 function writeStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(`${STORAGE_PREFIX}.${key}`, JSON.stringify(value));
+    localStorage.setItem(
+      `${LEGACY_STORAGE_PREFIX}.${key}`,
+      JSON.stringify(value),
+    );
   } catch {
     // storage full or unavailable
   }

@@ -1,6 +1,6 @@
-# @farfield/protocol
+# @agentbridge/protocol
 
-Strict schemas and types for Farfield's Codex protocol handling.
+Strict schemas and types for AgentBridge's Codex protocol handling.
 
 ## Goals
 
@@ -53,8 +53,8 @@ All helpers throw `ProtocolValidationError` with issue paths.
 ## Development
 
 ```bash
-bun run --filter @farfield/protocol build
-bun run --filter @farfield/protocol test
+bun run --filter @agentbridge/protocol build
+bun run --filter @agentbridge/protocol test
 ```
 
 ## Generated App-Server Schemas

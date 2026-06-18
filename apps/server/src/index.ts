@@ -8,13 +8,13 @@ import { execFileSync } from "node:child_process";
 import {
   getCodexServerNotificationMethodMapping,
   getCodexServerRequestMethodMapping,
-} from "@farfield/api";
+} from "@agentbridge/api";
 import type {
   AppServerGetAccountRateLimitsResponse,
   AppServerServerNotificationMethod,
   AppServerServerRequestMethod,
   IpcFrame,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import { Server as SocketServer } from "socket.io";
 import { z } from "zod";
 import {
@@ -28,7 +28,7 @@ import {
   type UnifiedProviderId,
   type UnifiedThread,
   type UnifiedThreadSummary,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import {
   parseBody,
   TraceMarkBodySchema,
@@ -63,12 +63,14 @@ import {
 const HOST = process.env["HOST"] ?? "127.0.0.1";
 const PORT = Number(process.env["PORT"] ?? 4311);
 const ACCESS_KEY = (
+  process.env["AGENTBRIDGE_ACCESS_KEY"] ??
+  process.env["AGENTBRIDGE_AUTH_KEY"] ??
   process.env["FARFIELD_ACCESS_KEY"] ??
   process.env["FARFIELD_AUTH_KEY"] ??
   ""
 ).trim();
 const HISTORY_LIMIT = 2_000;
-const USER_AGENT = "farfield/0.2.5";
+const USER_AGENT = "agentbridge/0.2.5";
 const IPC_RECONNECT_DELAY_MS = 1_000;
 const SIDEBAR_PREVIEW_MAX_CHARS = 180;
 const SIDEBAR_CORE_CACHE_TTL_MS = 1_000;
@@ -237,7 +239,7 @@ function jsonResponse(
     "Content-Length": encoded.length,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers":
-      "authorization, content-type, x-farfield-access-key",
+      "authorization, content-type, x-agentbridge-access-key, x-farfield-access-key",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
@@ -264,7 +266,9 @@ function accessKeyMatches(value: string | null | undefined): boolean {
 }
 
 function readRequestAccessKey(req: IncomingMessage): string | null {
-  const headerValue = req.headers["x-farfield-access-key"];
+  const headerValue =
+    req.headers["x-agentbridge-access-key"] ??
+    req.headers["x-farfield-access-key"];
   if (typeof headerValue === "string" && headerValue.trim()) {
     return headerValue;
   }
@@ -1354,9 +1358,9 @@ function printStartupBanner(): void {
   const lines = [
     "",
     rule,
-    paint("Farfield Server", "green", { bold: true }),
+    paint("AgentBridge Server", "green", { bold: true }),
     paint(`Local URL: http://${HOST}:${PORT}`, "cyan", { bold: true }),
-    paint("Open this now: https://farfield.app", "blue", {
+    paint("Open the AgentBridge web client.", "blue", {
       bold: true,
       underline: true,
     }),
@@ -1365,10 +1369,10 @@ function printStartupBanner(): void {
     paint("Remote access (recommended):", "yellow", { bold: true }),
     "1. Keep this server private. Do not expose it to the public internet.",
     "2. Put it behind a VPN, such as Tailscale.",
-    "3. In farfield.app, open Settings and set your server URL.",
+    "3. In AgentBridge, open Settings and set your server URL.",
     "",
     paint("Setup guide:", "cyan", { bold: true }),
-    paint("https://github.com/achimala/farfield#readme", "blue", {
+    paint("https://github.com/KAMIENDER/agentbridge#readme", "blue", {
       underline: true,
     }),
     "",
@@ -2069,7 +2073,9 @@ io.use((socket, next) => {
   }
 
   const authAccessKey = socket.handshake.auth?.["accessKey"];
-  const headerAccessKey = socket.handshake.headers["x-farfield-access-key"];
+  const headerAccessKey =
+    socket.handshake.headers["x-agentbridge-access-key"] ??
+    socket.handshake.headers["x-farfield-access-key"];
   const accessKey =
     typeof authAccessKey === "string"
       ? authAccessKey
@@ -2118,7 +2124,7 @@ server.on("connection", (socket) => {
 async function start(): Promise<void> {
   ensureTraceDirectory();
 
-  pushSystem("Starting Farfield monitor server", {
+  pushSystem("Starting AgentBridge monitor server", {
     appExecutable: codexExecutable,
     socketPath: ipcSocketPath,
     agentIds: configuredAgentIds,
@@ -2230,7 +2236,7 @@ async function handleShutdownSignal(signal: "SIGINT" | "SIGTERM"): Promise<void>
   }
 
   shutdownRequested = true;
-  process.stdout.write("\nStopping Farfield server...\n");
+  process.stdout.write("\nStopping AgentBridge server...\n");
 
   forcedExitTimer = setTimeout(() => {
     process.stderr.write("Shutdown is taking too long. Exiting now.\n");

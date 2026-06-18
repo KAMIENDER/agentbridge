@@ -1,4 +1,4 @@
-# @farfield/api
+# @agentbridge/api
 
 Typed client layer for the Codex app-server and desktop IPC.
 
@@ -39,15 +39,15 @@ import {
   CodexMonitorService,
   DesktopIpcClient,
   findLatestTurnParamsTemplate
-} from "@farfield/api";
-import { parseThreadConversationState } from "@farfield/protocol";
+} from "@agentbridge/api";
+import { parseThreadConversationState } from "@agentbridge/protocol";
 
 const ipc = new DesktopIpcClient({
   socketPath: "/tmp/codex-ipc/ipc-501.sock"
 });
 
 await ipc.connect();
-await ipc.initialize("farfield/0.2.0");
+await ipc.initialize("agentbridge/0.2.0");
 
 const service = new CodexMonitorService(ipc);
 

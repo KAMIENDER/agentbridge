@@ -6,7 +6,7 @@ import {
   type UnifiedRealtimeServerMessage,
   type UnifiedRealtimeTab,
   type UnifiedRealtimeThreadState,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import type { Server, Socket } from "socket.io";
 
 export const REALTIME_CLIENT_EVENT = "unified-realtime-client-message";

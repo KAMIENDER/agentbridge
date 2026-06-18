@@ -12,14 +12,14 @@ import {
   type ThreadConversationState,
   type TurnStartParams,
   type UserInputRequestId,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import {
   AppServerRpcError,
   DesktopIpcError,
   type AppServerNotificationListener,
   type AppServerRequestListener,
   type SendRequestOptions,
-} from "@farfield/api";
+} from "@agentbridge/api";
 
 const frameListeners: Array<(frame: IpcFrame) => void> = [];
 const connectionListeners: Array<
@@ -45,8 +45,8 @@ let listThreadsResponse: AppServerListThreadsResponse;
 let readThreadError: Error | null = null;
 let ipcRequestError: Error | null = null;
 
-vi.mock("@farfield/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@farfield/api")>();
+vi.mock("@agentbridge/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@agentbridge/api")>();
 
   class MockAppServerClient {
     public constructor(_options: object) {}
@@ -378,7 +378,7 @@ function createAdapter(): CodexAgentAdapter {
     appExecutable: "codex",
     socketPath: "/tmp/codex.sock",
     workspaceDir: "/tmp/project",
-    userAgent: "farfield-test",
+    userAgent: "agentbridge-test",
     reconnectDelayMs: 10,
   });
 }
@@ -417,7 +417,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     await adapter.sendMessage({
       threadId,
       ownerClientId: "client-1",
-      text: "hello from Farfield",
+      text: "hello from AgentBridge",
       model: "gpt-5.5",
     });
 
@@ -428,7 +428,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
         conversationId: threadId,
         turnStartParams: {
           threadId,
-          input: [{ type: "text", text: "hello from Farfield" }],
+          input: [{ type: "text", text: "hello from AgentBridge" }],
           model: "gpt-5.5",
           attachments: [],
         },
@@ -452,7 +452,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     await adapter.sendMessage({
       threadId,
       ownerClientId: "client-1",
-      text: "hello from Farfield",
+      text: "hello from AgentBridge",
       model: "gpt-5.5",
     });
 
@@ -469,7 +469,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
 
     await adapter.sendMessage({
       threadId,
-      text: "hello from Farfield",
+      text: "hello from AgentBridge",
       model: "gpt-5.5",
     });
 
@@ -477,7 +477,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     expect(startTurnCalls).toEqual([
       {
         threadId,
-        input: [{ type: "text", text: "hello from Farfield" }],
+        input: [{ type: "text", text: "hello from AgentBridge" }],
         model: "gpt-5.5",
         attachments: [],
       },
@@ -495,7 +495,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     await expect(
       adapter.sendMessage({
         threadId,
-        text: "hello from Farfield",
+        text: "hello from AgentBridge",
         model: "gpt-5.5",
       }),
     ).rejects.toThrow(
@@ -590,7 +590,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
     await expect(
       adapter.sendMessage({
         threadId: unownedThreadId,
-        text: "hello from Farfield",
+        text: "hello from AgentBridge",
         model: "gpt-5.5",
       }),
     ).rejects.toThrow(
@@ -748,7 +748,7 @@ describe("CodexAgentAdapter app-server pending requests", () => {
       },
     });
 
-    expect(result.ownerClientId).toBe("farfield");
+    expect(result.ownerClientId).toBe("agentbridge");
     expect(ipcRequestCalls).toEqual([]);
   });
 

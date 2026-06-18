@@ -6,7 +6,7 @@ import {
   FileText,
   FileSearch,
 } from "lucide-react";
-import type { UnifiedItem } from "@farfield/unified-surface";
+import type { UnifiedItem } from "@agentbridge/unified-surface";
 import { summarizeCommandForHeader } from "@/lib/command-action-ui";
 import { formatDurationSeconds } from "@/lib/tool-call-ui";
 import {

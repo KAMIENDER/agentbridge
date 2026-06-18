@@ -17,7 +17,7 @@ const PackageJsonSchema = z.object({
 const packageJson = PackageJsonSchema.parse(
   JSON.parse(readFileSync(packageJsonPath, "utf8")),
 );
-const packDir = mkdtempSync(path.join(tmpdir(), "farfield-server-pack-"));
+const packDir = mkdtempSync(path.join(tmpdir(), "agentbridge-server-pack-"));
 
 try {
   execFileSync("npm", ["pack", "--pack-destination", packDir], {
@@ -28,8 +28,8 @@ try {
     "bunx",
     [
       "--package",
-      path.join(packDir, `farfield-server-${packageJson.version}.tgz`),
-      "farfield-server",
+      path.join(packDir, `agentbridge-server-${packageJson.version}.tgz`),
+      "agentbridge-server",
       "--help",
     ],
     {

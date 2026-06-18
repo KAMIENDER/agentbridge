@@ -1,7 +1,9 @@
 import { z } from "zod";
 
-const STORAGE_KEY = "farfield.server-target.v1";
-const ACCESS_KEYS_STORAGE_KEY = "farfield.server-access-keys.v1";
+const STORAGE_KEY = "agentbridge.server-target.v1";
+const LEGACY_STORAGE_KEY = "farfield.server-target.v1";
+const ACCESS_KEYS_STORAGE_KEY = "agentbridge.server-access-keys.v1";
+const LEGACY_ACCESS_KEYS_STORAGE_KEY = "farfield.server-access-keys.v1";
 const DEFAULT_SERVER_PORT = 4311;
 
 const ServerProtocolSchema = z.enum(["http:", "https:"]);
@@ -82,7 +84,9 @@ function readStoredAccessKeyMap(): Record<string, string> {
     return {};
   }
 
-  const raw = window.localStorage.getItem(ACCESS_KEYS_STORAGE_KEY);
+  const raw =
+    window.localStorage.getItem(ACCESS_KEYS_STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_ACCESS_KEYS_STORAGE_KEY);
   if (!raw) {
     return {};
   }
@@ -101,6 +105,10 @@ function writeStoredAccessKeyMap(value: Record<string, string>): void {
     return;
   }
   window.localStorage.setItem(ACCESS_KEYS_STORAGE_KEY, JSON.stringify(value));
+  window.localStorage.setItem(
+    LEGACY_ACCESS_KEYS_STORAGE_KEY,
+    JSON.stringify(value),
+  );
 }
 
 function isLocalHost(hostname: string): boolean {
@@ -126,7 +134,9 @@ export function readStoredServerTarget(): StoredServerTarget | null {
     return null;
   }
 
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw =
+    window.localStorage.getItem(STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_STORAGE_KEY);
   if (raw === null) {
     return null;
   }
@@ -148,6 +158,7 @@ export function saveServerBaseUrl(value: string): StoredServerTarget {
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(next));
   }
 
   return next;
@@ -158,6 +169,7 @@ export function clearStoredServerTarget(): void {
     return;
   }
   window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_STORAGE_KEY);
 }
 
 export function readStoredServerAccessKey(baseUrlOverride?: string): string {

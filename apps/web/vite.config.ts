@@ -5,7 +5,8 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { z } from "zod";
 
-const FarfieldApiOriginEnvSchema = z.object({
+const AgentBridgeApiOriginEnvSchema = z.object({
+  AGENTBRIDGE_API_ORIGIN: z.string().url().optional(),
   FARFIELD_API_ORIGIN: z.string().url().optional(),
   REACT_COMPILER: z
     .enum(["0", "1", "true", "false"])
@@ -24,7 +25,8 @@ const FarfieldApiOriginEnvSchema = z.object({
     .transform((value) => value === "1" || value === "true")
     .optional(),
 });
-const parsedEnv = FarfieldApiOriginEnvSchema.safeParse({
+const parsedEnv = AgentBridgeApiOriginEnvSchema.safeParse({
+  AGENTBRIDGE_API_ORIGIN: process.env["AGENTBRIDGE_API_ORIGIN"],
   FARFIELD_API_ORIGIN: process.env["FARFIELD_API_ORIGIN"],
   REACT_COMPILER: process.env["REACT_COMPILER"],
   REACT_PROFILING: process.env["REACT_PROFILING"],
@@ -43,6 +45,7 @@ if (!parsedEnv.success) {
   );
 }
 const apiOrigin =
+  parsedEnv.data.AGENTBRIDGE_API_ORIGIN ??
   parsedEnv.data.FARFIELD_API_ORIGIN ?? "http://127.0.0.1:4311";
 const reactCompilerOverride = parsedEnv.data.REACT_COMPILER ?? null;
 const reactProfilingEnabled = parsedEnv.data.REACT_PROFILING ?? false;
@@ -65,7 +68,7 @@ export default defineConfig(({ command }) => {
 
   return {
     define: {
-      __FARFIELD_DISABLE_RATE_LIMITS__: JSON.stringify(disableRateLimits),
+      __AGENTBRIDGE_DISABLE_RATE_LIMITS__: JSON.stringify(disableRateLimits),
     },
     plugins: [
       react(
@@ -82,8 +85,8 @@ export default defineConfig(({ command }) => {
         disable: !pwaEnabled,
         registerType: "autoUpdate",
         manifest: {
-          name: "Farfield",
-          short_name: "Farfield",
+          name: "AgentBridge",
+          short_name: "AgentBridge",
           start_url: "/",
           scope: "/",
           display: "standalone",

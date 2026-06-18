@@ -10,7 +10,7 @@ import {
   type IpcFrame,
   type IpcResponseFrame,
   parseIpcFrame
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import { DesktopIpcError } from "./errors.js";
 
 interface PendingRequest {
@@ -309,7 +309,7 @@ export class DesktopIpcClient {
       version: 1,
       method: "initialize",
       params: {
-        clientType: "farfield"
+        clientType: "agentbridge"
       }
     });
 

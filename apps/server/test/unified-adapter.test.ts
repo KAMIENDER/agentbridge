@@ -5,8 +5,8 @@ import {
   type UnifiedCommand,
   type UnifiedCommandKind,
   type UnifiedProviderId,
-} from "@farfield/unified-surface";
-import type { ThreadConversationState } from "@farfield/protocol";
+} from "@agentbridge/unified-surface";
+import type { ThreadConversationState } from "@agentbridge/protocol";
 import {
   AgentUnifiedProviderAdapter,
   FEATURE_ID_BY_COMMAND_KIND,
@@ -814,8 +814,8 @@ describe("unified provider adapters", () => {
                 status: "completed",
                 action: {
                   type: "search",
-                  query: "Farfield PR testing",
-                  queries: ["Farfield PR testing"],
+                  query: "AgentBridge PR testing",
+                  queries: ["AgentBridge PR testing"],
                 },
               },
               {
@@ -948,7 +948,7 @@ describe("unified provider adapters", () => {
       rawWebSearchItem && rawWebSearchItem.type === "webSearch"
         ? rawWebSearchItem.query
         : null,
-    ).toBe("Farfield PR testing");
+    ).toBe("AgentBridge PR testing");
 
     const rawMessageItem = result.thread.turns[0]?.items[9];
     expect(rawMessageItem?.type).toBe("agentMessage");

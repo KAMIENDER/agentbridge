@@ -1,10 +1,11 @@
 {
-  "name": "@farfield/server",
+  "name": "@agentbridge/server",
   "version": "0.2.5",
   "private": false,
   "type": "module",
-  "description": "Farfield server for Codex and OpenCode",
+  "description": "AgentBridge server for Codex and OpenCode",
   "bin": {
+    "agentbridge-server": "dist/index.js",
     "farfield-server": "dist/index.js"
   },
   "files": [
@@ -31,10 +32,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@farfield/api": "workspace:*",
-    "@farfield/opencode-api": "workspace:*",
-    "@farfield/protocol": "workspace:*",
-    "@farfield/unified-surface": "workspace:*",
+    "@agentbridge/api": "workspace:*",
+    "@agentbridge/opencode-api": "workspace:*",
+    "@agentbridge/protocol": "workspace:*",
+    "@agentbridge/unified-surface": "workspace:*",
     "esbuild": "^0.25.10",
     "socket.io-client": "^4.8.1"
   }

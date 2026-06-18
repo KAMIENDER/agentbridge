@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadConversationState } from "@farfield/protocol";
+import { parseThreadConversationState } from "@agentbridge/protocol";
 import { mergeThreadConversationStates } from "../src/agents/adapters/codex-agent.js";
 
 describe("mergeThreadConversationStates", () => {

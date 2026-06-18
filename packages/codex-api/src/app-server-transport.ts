@@ -7,7 +7,7 @@ import {
   AppServerServerNotificationSchema,
   type AppServerServerRequest,
   AppServerServerRequestSchema
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import { z } from "zod";
 import { AppServerRpcError, AppServerTransportError } from "./errors.js";
 import {
@@ -164,7 +164,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         ...process.env,
         ...this.env,
         CODEX_USER_AGENT: this.userAgent,
-        CODEX_CLIENT_ID: `farfield-${randomUUID()}`
+        CODEX_CLIENT_ID: `agentbridge-${randomUUID()}`
       },
       shell: process.platform === "win32",
       stdio: ["pipe", "pipe", "pipe"],
@@ -459,7 +459,7 @@ export class ChildProcessAppServerTransport implements AppServerTransport {
         "initialize",
         {
           clientInfo: {
-            name: "farfield",
+            name: "agentbridge",
             version: "0.2.0"
           },
           ...(Object.keys(capabilities).length > 0 ? { capabilities } : {})

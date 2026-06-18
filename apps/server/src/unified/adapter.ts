@@ -2,7 +2,7 @@ import {
   assertNever,
   type ThreadConversationState,
   UserInputRequestSchema,
-} from "@farfield/protocol";
+} from "@agentbridge/protocol";
 import {
   JsonValueSchema,
   UnifiedFeatureMatrixSchema,
@@ -20,7 +20,7 @@ import {
   type UnifiedProviderId,
   type UnifiedThread,
   type UnifiedThreadSummary,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import { z } from "zod";
 import type { AgentAdapter } from "../agents/types.js";
 

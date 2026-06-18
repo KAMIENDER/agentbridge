@@ -8,7 +8,7 @@ import {
   type UnifiedRealtimeCoreState,
   type UnifiedRealtimeServerMessage,
   type UnifiedRealtimeThreadState,
-} from "@farfield/unified-surface";
+} from "@agentbridge/unified-surface";
 import { Server as SocketServer } from "socket.io";
 import { io as createSocketClient, type Socket } from "socket.io-client";
 import {
