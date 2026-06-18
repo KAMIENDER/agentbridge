@@ -138,6 +138,7 @@ import { z } from "zod";
 type Health = Awaited<ReturnType<typeof getHealth>>;
 type SidebarThreadsResponse = Awaited<ReturnType<typeof listSidebarThreads>>;
 type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
+type SettingsPanel = "connection" | "profiles" | "security";
 type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
@@ -1544,6 +1545,8 @@ export function App(): React.JSX.Element {
     inferServerProfileName(initialServerBaseUrl),
   );
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [activeSettingsPanel, setActiveSettingsPanel] =
+    useState<SettingsPanel>("connection");
 
   /* UI state */
   const [activeTab, setActiveTab] = useState<"chat" | "debug">(
@@ -1673,6 +1676,21 @@ export function App(): React.JSX.Element {
   );
   const activeServerLabel =
     activeServerProfile?.name ?? inferServerProfileName(serverBaseUrl);
+  const activeSettingsPanelCopy =
+    activeSettingsPanel === "connection"
+      ? {
+          title: "Connection",
+          description: "Choose the Mac this frontend controls.",
+        }
+      : activeSettingsPanel === "profiles"
+        ? {
+            title: "Profiles",
+            description: "Keep one saved connection for each Mac.",
+          }
+        : {
+            title: "Security",
+            description: "Store the access key for the active server locally.",
+          };
   const unifiedWebSocketUrl = useMemo(
     () => getUnifiedWebSocketUrl(serverBaseUrl),
     [serverBaseUrl],
@@ -5527,23 +5545,30 @@ export function App(): React.JSX.Element {
                 : "flex-1 min-h-0 flex flex-col"
             }
           >
-            {/* Error bar */}
+            {/* Access key prompt */}
             <AnimatePresence>
               {showAccessKeyPrompt && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden shrink-0"
+                  className="relative shrink-0 overflow-hidden bg-background px-4 pb-4 pt-3 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-border/80"
                 >
-                  <div className="flex flex-col gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100 sm:flex-row sm:items-center">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <KeyRound size={15} className="shrink-0" />
-                      <span className="truncate">
-                        {accessKeyErrorMessage || "Access key required"}
+                  <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-3.5 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/12 text-amber-700 dark:text-amber-200">
+                        <KeyRound size={15} />
                       </span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground">
+                          {accessKeyErrorMessage || "Access key required"}
+                        </div>
+                        <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                          Enter the key for {activeServerLabel} to reconnect.
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex min-w-0 gap-2">
+                    <div className="flex min-w-0 gap-2 sm:w-80">
                       <Input
                         type="password"
                         value={serverAccessKeyDraft}
@@ -5557,15 +5582,15 @@ export function App(): React.JSX.Element {
                           }
                         }}
                         placeholder="Access key"
-                        className="h-8 min-w-0 flex-1 bg-background/90 text-sm text-foreground sm:w-56"
+                        className="h-9 min-w-0 flex-1 bg-background text-base text-foreground shadow-none md:text-sm"
                       />
                       <Button
                         type="button"
                         onClick={() => {
                           void saveAccessKeyAndRetry();
                         }}
-                        variant="outline"
-                        className="h-8 shrink-0 bg-background/90 text-xs"
+                        variant="default"
+                        className="h-9 shrink-0 px-4 text-sm"
                       >
                         Unlock
                       </Button>
@@ -6060,9 +6085,9 @@ export function App(): React.JSX.Element {
               exit={{ scale: 0.985, opacity: 0 }}
               transition={{ duration: 0.16 }}
               onClick={(event) => event.stopPropagation()}
-              className="grid h-full w-full overflow-hidden border-border bg-background shadow-2xl md:h-[min(88vh,840px)] md:max-w-5xl md:grid-cols-[240px_minmax(0,1fr)] md:rounded-2xl md:border"
+              className="flex h-full w-full flex-col overflow-hidden border-border bg-background shadow-2xl md:grid md:h-[min(88vh,840px)] md:max-w-5xl md:grid-cols-[240px_minmax(0,1fr)] md:rounded-2xl md:border"
             >
-              <aside className="flex min-h-0 flex-col border-b border-border bg-muted/25 md:border-b-0 md:border-r">
+              <aside className="shrink-0 border-b border-border bg-muted/25 md:flex md:min-h-0 md:flex-col md:border-b-0 md:border-r">
                 <div className="flex items-start justify-between gap-3 px-4 py-4 md:block">
                   <div>
                     <div className="text-base font-semibold">Settings</div>
@@ -6083,27 +6108,51 @@ export function App(): React.JSX.Element {
                 </div>
 
                 <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:block md:space-y-1 md:overflow-visible md:pb-0">
-                  <a
-                    href="#settings-connection"
-                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-foreground hover:bg-muted md:w-full"
+                  <button
+                    type="button"
+                    onClick={() => setActiveSettingsPanel("connection")}
+                    className={`flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm md:w-full ${
+                      activeSettingsPanel === "connection"
+                        ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/70"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                    aria-current={
+                      activeSettingsPanel === "connection" ? "page" : undefined
+                    }
                   >
                     <Server size={15} />
                     Connection
-                  </a>
-                  <a
-                    href="#settings-profiles"
-                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground md:w-full"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSettingsPanel("profiles")}
+                    className={`flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm md:w-full ${
+                      activeSettingsPanel === "profiles"
+                        ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/70"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                    aria-current={
+                      activeSettingsPanel === "profiles" ? "page" : undefined
+                    }
                   >
                     <Monitor size={15} />
                     Profiles
-                  </a>
-                  <a
-                    href="#settings-security"
-                    className="flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground md:w-full"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSettingsPanel("security")}
+                    className={`flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm md:w-full ${
+                      activeSettingsPanel === "security"
+                        ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/70"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                    aria-current={
+                      activeSettingsPanel === "security" ? "page" : undefined
+                    }
                   >
                     <Shield size={15} />
                     Security
-                  </a>
+                  </button>
                 </nav>
 
                 <div className="mt-auto hidden border-t border-border px-4 py-4 md:block">
@@ -6119,12 +6168,14 @@ export function App(): React.JSX.Element {
                 </div>
               </aside>
 
-              <section className="flex min-h-0 flex-col">
+              <section className="flex min-h-0 flex-1 flex-col">
                 <div className="hidden items-center justify-between border-b border-border px-6 py-4 md:flex">
                   <div>
-                    <div className="text-lg font-semibold">Connection</div>
+                    <div className="text-lg font-semibold">
+                      {activeSettingsPanelCopy.title}
+                    </div>
                     <div className="mt-1 text-sm text-muted-foreground">
-                      Choose the Mac this frontend controls.
+                      {activeSettingsPanelCopy.description}
                     </div>
                   </div>
                   <Button
@@ -6141,7 +6192,8 @@ export function App(): React.JSX.Element {
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-7">
                   <div className="mx-auto max-w-3xl space-y-8">
-                    <section id="settings-connection" className="space-y-3">
+                    {activeSettingsPanel === "connection" && (
+                    <section className="space-y-3">
                       <div>
                         <h2 className="text-sm font-semibold">Connection</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -6213,8 +6265,10 @@ export function App(): React.JSX.Element {
                         </div>
                       </div>
                     </section>
+                    )}
 
-                    <section id="settings-profiles" className="space-y-3">
+                    {activeSettingsPanel === "profiles" && (
+                    <section className="space-y-3">
                       <div>
                         <h2 className="text-sm font-semibold">Profiles</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -6310,8 +6364,10 @@ export function App(): React.JSX.Element {
                         </div>
                       </div>
                     </section>
+                    )}
 
-                    <section id="settings-security" className="space-y-3">
+                    {activeSettingsPanel === "security" && (
+                    <section className="space-y-3">
                       <div>
                         <h2 className="text-sm font-semibold">Security</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -6371,6 +6427,7 @@ export function App(): React.JSX.Element {
                         </div>
                       </div>
                     </section>
+                    )}
                   </div>
                 </div>
               </section>
