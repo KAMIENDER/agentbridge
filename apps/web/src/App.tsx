@@ -30,7 +30,6 @@ import {
   RefreshCw,
   Search,
   Server,
-  Shield,
   Sun,
   X,
 } from "lucide-react";
@@ -138,7 +137,7 @@ import { z } from "zod";
 type Health = Awaited<ReturnType<typeof getHealth>>;
 type SidebarThreadsResponse = Awaited<ReturnType<typeof listSidebarThreads>>;
 type ModesResponse = Awaited<ReturnType<typeof listCollaborationModes>>;
-type SettingsPanel = "connection" | "profiles" | "security";
+type SettingsPanel = "connection" | "profiles";
 type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
@@ -1662,12 +1661,6 @@ export function App(): React.JSX.Element {
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
-  const hasServerBaseUrlDraftChanges =
-    serverBaseUrlDraft.trim() !== serverBaseUrl;
-  const hasServerAccessKeyDraftChanges =
-    serverAccessKeyDraft.trim() !== serverAccessKey;
-  const hasServerConnectionDraftChanges =
-    hasServerBaseUrlDraftChanges || hasServerAccessKeyDraftChanges;
   const showAccessKeyPrompt = accessKeyErrorMessage.length > 0;
   const activeServerProfile = useMemo(
     () =>
@@ -1680,17 +1673,12 @@ export function App(): React.JSX.Element {
     activeSettingsPanel === "connection"
       ? {
           title: "Connection",
-          description: "Choose the Mac this frontend controls.",
+          description: "Add or update a Mac connection.",
         }
-      : activeSettingsPanel === "profiles"
-        ? {
-            title: "Profiles",
-            description: "Keep one saved connection for each Mac.",
-          }
-        : {
-            title: "Security",
-            description: "Store the access key for the active server locally.",
-          };
+      : {
+          title: "Profiles",
+          description: "Switch between saved Mac connections.",
+        };
   const unifiedWebSocketUrl = useMemo(
     () => getUnifiedWebSocketUrl(serverBaseUrl),
     [serverBaseUrl],
@@ -3039,18 +3027,33 @@ export function App(): React.JSX.Element {
 
   const saveServerTarget = useCallback(async () => {
     try {
+      setError("");
+      const profileName =
+        serverProfileNameDraft.trim() ||
+        inferServerProfileName(serverBaseUrlDraft);
+      const nextProfiles = upsertServerProfile({
+        name: profileName,
+        baseUrl: serverBaseUrlDraft,
+      });
       const savedAccessKey = setServerAccessKey(
         serverBaseUrlDraft,
         serverAccessKeyDraft,
       );
+      setServerProfiles(nextProfiles);
       setServerAccessKeyState(savedAccessKey);
       setServerAccessKeyDraft(savedAccessKey);
       setAccessKeyErrorMessage("");
       await switchServerTarget(serverBaseUrlDraft, { saved: true });
+      setServerProfileNameDraft(profileName);
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [serverAccessKeyDraft, serverBaseUrlDraft, switchServerTarget]);
+  }, [
+    serverAccessKeyDraft,
+    serverBaseUrlDraft,
+    serverProfileNameDraft,
+    switchServerTarget,
+  ]);
 
   const saveAccessKeyAndRetry = useCallback(async () => {
     try {
@@ -3080,27 +3083,6 @@ export function App(): React.JSX.Element {
     serverAccessKeyDraft,
     serverBaseUrl,
   ]);
-
-  const saveCurrentServerProfile = useCallback(() => {
-    try {
-      setError("");
-      const nextProfiles = upsertServerProfile({
-        name: serverProfileNameDraft,
-        baseUrl: serverBaseUrlDraft,
-      });
-      const savedAccessKey = setServerAccessKey(
-        serverBaseUrlDraft,
-        serverAccessKeyDraft,
-      );
-      setServerProfiles(nextProfiles);
-      setServerAccessKeyState(savedAccessKey);
-      setServerAccessKeyDraft(savedAccessKey);
-      setAccessKeyErrorMessage("");
-      setServerProfileNameDraft(inferServerProfileName(serverBaseUrlDraft));
-    } catch (e) {
-      setError(toErrorMessage(e));
-    }
-  }, [serverAccessKeyDraft, serverBaseUrlDraft, serverProfileNameDraft]);
 
   const applyServerProfile = useCallback(
     async (profile: ServerProfile) => {
@@ -6138,21 +6120,6 @@ export function App(): React.JSX.Element {
                     <Monitor size={15} />
                     Profiles
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSettingsPanel("security")}
-                    className={`flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm md:w-full ${
-                      activeSettingsPanel === "security"
-                        ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border/70"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                    aria-current={
-                      activeSettingsPanel === "security" ? "page" : undefined
-                    }
-                  >
-                    <Shield size={15} />
-                    Security
-                  </button>
                 </nav>
 
                 <div className="mt-auto hidden border-t border-border px-4 py-4 md:block">
@@ -6197,7 +6164,7 @@ export function App(): React.JSX.Element {
                       <div>
                         <h2 className="text-sm font-semibold">Connection</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Set the Farfield server URL used by this browser.
+                          Save a Mac URL with its own local access key.
                         </p>
                       </div>
 
@@ -6231,6 +6198,65 @@ export function App(): React.JSX.Element {
 
                         <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
                           <div className="min-w-0">
+                            <Label
+                              htmlFor="settings-access-key"
+                              className="text-sm font-medium"
+                            >
+                              Access key
+                            </Label>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Stored separately for this server URL.
+                            </div>
+                          </div>
+                          <Input
+                            id="settings-access-key"
+                            type="password"
+                            value={serverAccessKeyDraft}
+                            onChange={(e) =>
+                              setServerAccessKeyDraft(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveServerTarget();
+                              }
+                            }}
+                            placeholder="Leave empty for no key"
+                            className="h-9 text-base md:text-sm"
+                          />
+                        </div>
+
+                        <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+                          <div className="min-w-0">
+                            <Label
+                              htmlFor="settings-profile-name"
+                              className="text-sm font-medium"
+                            >
+                              Profile name
+                            </Label>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Used in the Profiles list.
+                            </div>
+                          </div>
+                          <Input
+                            id="settings-profile-name"
+                            value={serverProfileNameDraft}
+                            onChange={(e) =>
+                              setServerProfileNameDraft(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveServerTarget();
+                              }
+                            }}
+                            placeholder="MacBook Pro"
+                            className="h-9 text-base md:text-sm"
+                          />
+                        </div>
+
+                        <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+                          <div className="min-w-0">
                             <div className="text-sm font-medium">Current target</div>
                             <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
                               {serverBaseUrl}
@@ -6244,12 +6270,9 @@ export function App(): React.JSX.Element {
                               }}
                               variant="default"
                               className="h-9 text-sm"
-                              disabled={
-                                serverBaseUrlDraft.trim().length === 0 ||
-                                !hasServerConnectionDraftChanges
-                              }
+                              disabled={serverBaseUrlDraft.trim().length === 0}
                             >
-                              Save changes
+                              Save connection
                             </Button>
                             <Button
                               type="button"
@@ -6277,48 +6300,16 @@ export function App(): React.JSX.Element {
                       </div>
 
                       <div className="overflow-hidden rounded-xl border border-border bg-background">
-                        <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                          <div className="min-w-0">
-                            <Label
-                              htmlFor="settings-profile-name"
-                              className="text-sm font-medium"
-                            >
-                              Profile name
-                            </Label>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              Name the current server before saving it.
-                            </div>
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-[minmax(0,16rem)_auto]">
-                            <Input
-                              id="settings-profile-name"
-                              value={serverProfileNameDraft}
-                              onChange={(e) =>
-                                setServerProfileNameDraft(e.target.value)
-                              }
-                              placeholder="MacBook Pro"
-                              className="h-9 text-base md:text-sm"
-                            />
-                            <Button
-                              type="button"
-                              onClick={saveCurrentServerProfile}
-                              variant="outline"
-                              className="h-9 text-sm"
-                              disabled={serverBaseUrlDraft.trim().length === 0}
-                            >
-                              Save profile
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-border">
+                        <div>
                           {serverProfiles.length > 0 ? (
                             serverProfiles.map((profile) => {
                               const isActive = profile.baseUrl === serverBaseUrl;
+                              const hasProfileAccessKey =
+                                getServerAccessKey(profile.baseUrl).length > 0;
                               return (
                                 <div
                                   key={profile.id}
-                                  className={`grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center ${
+                                  className={`grid gap-3 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center ${
                                     isActive ? "bg-primary/5" : ""
                                   }`}
                                 >
@@ -6341,6 +6332,11 @@ export function App(): React.JSX.Element {
                                     </div>
                                     <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
                                       {profile.baseUrl}
+                                    </div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                      {hasProfileAccessKey
+                                        ? "Access key saved"
+                                        : "No access key"}
                                     </div>
                                   </button>
                                   <Button
@@ -6366,68 +6362,6 @@ export function App(): React.JSX.Element {
                     </section>
                     )}
 
-                    {activeSettingsPanel === "security" && (
-                    <section className="space-y-3">
-                      <div>
-                        <h2 className="text-sm font-semibold">Security</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Store the access key for the active server locally.
-                        </p>
-                      </div>
-
-                      <div className="overflow-hidden rounded-xl border border-border bg-background">
-                        <div className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
-                          <div className="min-w-0">
-                            <Label
-                              htmlFor="settings-access-key"
-                              className="text-sm font-medium"
-                            >
-                              Access key
-                            </Label>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              Required only when FARFIELD_ACCESS_KEY is set.
-                            </div>
-                          </div>
-                          <Input
-                            id="settings-access-key"
-                            type="password"
-                            value={serverAccessKeyDraft}
-                            onChange={(e) => setServerAccessKeyDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                void saveServerTarget();
-                              }
-                            }}
-                            placeholder="Leave empty for no key"
-                            className="h-9 text-base md:text-sm"
-                          />
-                        </div>
-
-                        <div className="grid gap-3 border-t border-border px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                          <div className="text-sm text-muted-foreground">
-                            {serverAccessKey
-                              ? "An access key is saved for this server."
-                              : "No access key is saved for this server."}
-                          </div>
-                          <Button
-                            type="button"
-                            onClick={() => {
-                              void saveServerTarget();
-                            }}
-                            variant="outline"
-                            className="h-9 justify-self-start text-sm md:justify-self-end"
-                            disabled={
-                              serverBaseUrlDraft.trim().length === 0 ||
-                              !hasServerConnectionDraftChanges
-                            }
-                          >
-                            Save security
-                          </Button>
-                        </div>
-                      </div>
-                    </section>
-                    )}
                   </div>
                 </div>
               </section>
