@@ -3,6 +3,7 @@ import { GitBranch } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeSnippet } from "./CodeSnippet";
+import { ConversationImage, imageSourceFromUrl } from "./ConversationImage";
 
 interface MarkdownTextProps {
   text: string;
@@ -25,6 +26,18 @@ function detectLanguage(className: string | undefined): string {
 
 const components: Components = {
   pre: ({ children }) => <>{children}</>,
+  img: ({ src, alt }) => {
+    if (!src) {
+      return null;
+    }
+
+    return (
+      <ConversationImage
+        source={imageSourceFromUrl(src, alt ?? "Message image")}
+        className="my-2"
+      />
+    );
+  },
   code: ({ className, children }) => {
     const code = String(children ?? "");
     const isBlock =

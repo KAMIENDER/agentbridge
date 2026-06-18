@@ -1237,6 +1237,10 @@ type RawResponseMessageItem = Extract<
   { type: "message" }
 >;
 type RawResponseMessageContentPart = RawResponseMessageItem["content"][number];
+type ImageGenerationItem = Extract<
+  ThreadConversationState["turns"][number]["items"][number],
+  { type: "image_generation_call" | "imageGeneration" }
+>;
 type RawToolOutput =
   | Extract<
       ThreadConversationState["turns"][number]["items"][number],
@@ -1334,6 +1338,52 @@ function rawJsonValueToText(value: RawToolOutput): string {
     return stringValue.data;
   }
   return JSON.stringify(value);
+}
+
+function imageGenerationStatus(
+  status: ImageGenerationItem["status"],
+): "inProgress" | "completed" | "failed" {
+  switch (status) {
+    case "in_progress":
+    case "generating":
+      return "inProgress";
+    case "completed":
+    case "failed":
+      return status;
+    default:
+      return assertNever(status);
+  }
+}
+
+function imageGenerationResultUrl(result: string): string {
+  if (
+    result.startsWith("data:") ||
+    result.startsWith("http://") ||
+    result.startsWith("https://")
+  ) {
+    return result;
+  }
+  return `data:image/png;base64,${result}`;
+}
+
+function imageGenerationRevisedPrompt(item: ImageGenerationItem): string | null | undefined {
+  switch (item.type) {
+    case "image_generation_call":
+      return item.revised_prompt;
+    case "imageGeneration":
+      return item.revisedPrompt;
+    default:
+      return assertNever(item);
+  }
+}
+
+function imageGenerationArguments(item: ImageGenerationItem): JsonValue {
+  const revisedPrompt = imageGenerationRevisedPrompt(item);
+  return jsonValueFromString(
+    JSON.stringify({
+      ...(revisedPrompt !== undefined ? { revisedPrompt } : {}),
+    }),
+  );
 }
 
 function mapTurnItem(
@@ -1620,6 +1670,26 @@ function mapTurnItem(
                 : {
                     type: "other" as const,
                   },
+      };
+
+    case "image_generation_call":
+    case "imageGeneration":
+      return {
+        id: item.id,
+        type: "dynamicToolCall",
+        tool: "image_generation",
+        arguments: imageGenerationArguments(item),
+        status: imageGenerationStatus(item.status),
+        ...(item.result
+          ? {
+              contentItems: [
+                {
+                  type: "inputImage" as const,
+                  imageUrl: imageGenerationResultUrl(item.result),
+                },
+              ],
+            }
+          : {}),
       };
 
     case "mcpToolCall":

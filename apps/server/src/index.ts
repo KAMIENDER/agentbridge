@@ -34,6 +34,12 @@ import {
   TraceMarkBodySchema,
   TraceStartBodySchema,
 } from "./http-schemas.js";
+import {
+  LocalImageQuerySchema,
+  readLocalImageFile,
+  type LocalImageFile,
+  type LocalImageReadIssueCode,
+} from "./local-image.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
@@ -241,6 +247,40 @@ function jsonResponse(
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   });
   res.end(encoded);
+}
+
+function localImageResponse(
+  res: ServerResponse,
+  image: LocalImageFile,
+): void {
+  res.writeHead(200, {
+    "Content-Type": image.contentType,
+    "Content-Length": image.bytes.length,
+    "Cache-Control": "private, max-age=60",
+    "X-Content-Type-Options": "nosniff",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers":
+      "authorization, content-type, x-farfield-access-key",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  });
+  res.end(image.bytes);
+}
+
+function localImageIssueStatusCode(code: LocalImageReadIssueCode): number {
+  switch (code) {
+    case "imagePathNotAbsolute":
+      return 400;
+    case "imageNotFound":
+      return 404;
+    case "imageNotFile":
+      return 400;
+    case "imageTooLarge":
+      return 413;
+    case "unsupportedImageContent":
+      return 415;
+    case "imageReadFailed":
+      return 500;
+  }
 }
 
 function accessKeyEnabled(): boolean {
@@ -1425,6 +1465,44 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         state: getRuntimeStateSnapshot(),
       });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/local-image") {
+      const parsedQuery = LocalImageQuerySchema.safeParse({
+        path: url.searchParams.get("path"),
+      });
+
+      if (!parsedQuery.success) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidImageQuery",
+            message: "Image request query is invalid",
+            details: {
+              issues: parsedQuery.error.issues.map((issue) => ({
+                path: issue.path.join("."),
+                message: issue.message,
+              })),
+            },
+          },
+        });
+        return;
+      }
+
+      const imageResult = await readLocalImageFile(parsedQuery.data.path);
+      if (imageResult.type === "error") {
+        jsonResponse(res, localImageIssueStatusCode(imageResult.issue.code), {
+          ok: false,
+          error: {
+            code: imageResult.issue.code,
+            message: imageResult.issue.message,
+          },
+        });
+        return;
+      }
+
+      localImageResponse(res, imageResult.image);
       return;
     }
 

@@ -47,6 +47,8 @@ const ApiEnvelopeSchema = z
   })
   .passthrough();
 
+const LocalImagePathSchema = z.string().min(1).max(4096);
+
 const ApiFailureEnvelopeSchema = z
   .object({
     ok: z.literal(false),
@@ -514,6 +516,55 @@ async function requestJson(
     response,
     payload,
   };
+}
+
+export async function fetchLocalImageBlob(
+  filePath: string,
+  options?: { signal?: AbortSignal },
+): Promise<Blob> {
+  const parsedPath = LocalImagePathSchema.parse(filePath);
+  const params = new URLSearchParams();
+  params.set("path", parsedPath);
+
+  const headers = new Headers();
+  const accessKey = readStoredServerAccessKey();
+  if (accessKey) {
+    headers.set("X-Farfield-Access-Key", accessKey);
+  }
+  headers.set("Accept", "image/png,image/jpeg,image/gif,image/webp,image/avif");
+
+  const requestInit: RequestInit = options?.signal
+    ? {
+        headers,
+        signal: options.signal,
+      }
+    : {
+        headers,
+      };
+
+  const response = await fetch(
+    buildServerUrl(`/api/local-image?${params.toString()}`),
+    requestInit,
+  );
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      const accessError = new ApiRequestError(
+        accessKey ? "Invalid access key" : "Access key required",
+        {
+          code: accessKey ? "accessKeyInvalid" : "accessKeyRequired",
+        },
+      );
+      notifyAccessKeyError(accessError);
+      throw accessError;
+    }
+
+    throw new ApiRequestError(`Image request failed with status ${response.status}`, {
+      code: "localImageRequestFailed",
+    });
+  }
+
+  return response.blob();
 }
 
 function readApiFailure(payload: JsonValue): {

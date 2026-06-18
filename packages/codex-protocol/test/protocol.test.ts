@@ -888,6 +888,20 @@ describe("codex-protocol schemas", () => {
               path: "/tmp/example.png"
             },
             {
+              id: "item-image-generation",
+              type: "image_generation_call",
+              status: "completed",
+              result: "iVBORw0KGgo=",
+              revised_prompt: "A tiny observatory above the sea"
+            },
+            {
+              id: "item-image-generation-read",
+              type: "imageGeneration",
+              status: "generating",
+              result: "iVBORw0KGgo=",
+              revisedPrompt: "A tiny observatory above the sea"
+            },
+            {
               id: "item-review-enter",
               type: "enteredReviewMode",
               review: "review-1"
@@ -906,8 +920,10 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("mcpToolCall");
     expect(parsed.turns[0]?.items[1]?.type).toBe("collabAgentToolCall");
     expect(parsed.turns[0]?.items[2]?.type).toBe("imageView");
-    expect(parsed.turns[0]?.items[3]?.type).toBe("enteredReviewMode");
-    expect(parsed.turns[0]?.items[4]?.type).toBe("exitedReviewMode");
+    expect(parsed.turns[0]?.items[3]?.type).toBe("image_generation_call");
+    expect(parsed.turns[0]?.items[4]?.type).toBe("imageGeneration");
+    expect(parsed.turns[0]?.items[5]?.type).toBe("enteredReviewMode");
+    expect(parsed.turns[0]?.items[6]?.type).toBe("exitedReviewMode");
   });
 
   it("parses contextCompaction item when completed is omitted", () => {

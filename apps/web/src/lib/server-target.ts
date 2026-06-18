@@ -103,22 +103,8 @@ function writeStoredAccessKeyMap(value: Record<string, string>): void {
   window.localStorage.setItem(ACCESS_KEYS_STORAGE_KEY, JSON.stringify(value));
 }
 
-function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
 export function getDefaultServerBaseUrl(): string {
-  if (typeof window === "undefined") {
-    return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
-  }
-
-  const hostname = window.location.hostname;
-
-  if (isLocalHost(hostname)) {
-    return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
-  }
-
-  return window.location.origin;
+  return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
 }
 
 export function readStoredServerTarget(): StoredServerTarget | null {

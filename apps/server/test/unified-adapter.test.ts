@@ -819,6 +819,20 @@ describe("unified provider adapters", () => {
                 },
               },
               {
+                type: "image_generation_call",
+                id: "image-generation-1",
+                status: "completed",
+                revised_prompt: "A tiny observatory above the sea",
+                result: "iVBORw0KGgo=",
+              },
+              {
+                type: "imageGeneration",
+                id: "image-generation-2",
+                status: "generating",
+                revisedPrompt: "A tiny observatory above the sea",
+                result: "iVBORw0KGgo=",
+              },
+              {
                 type: "message",
                 role: "assistant",
                 content: [
@@ -950,7 +964,42 @@ describe("unified provider adapters", () => {
         : null,
     ).toBe("Farfield PR testing");
 
-    const rawMessageItem = result.thread.turns[0]?.items[9];
+    const imageGenerationItem = result.thread.turns[0]?.items[9];
+    expect(imageGenerationItem?.type).toBe("dynamicToolCall");
+    expect(
+      imageGenerationItem && imageGenerationItem.type === "dynamicToolCall"
+        ? imageGenerationItem.tool
+        : null,
+    ).toBe("image_generation");
+    expect(
+      imageGenerationItem && imageGenerationItem.type === "dynamicToolCall"
+        ? imageGenerationItem.contentItems?.[0]?.type
+        : null,
+    ).toBe("inputImage");
+    expect(
+      imageGenerationItem &&
+        imageGenerationItem.type === "dynamicToolCall" &&
+        imageGenerationItem.contentItems?.[0]?.type === "inputImage"
+        ? imageGenerationItem.contentItems[0].imageUrl
+        : null,
+    ).toBe("data:image/png;base64,iVBORw0KGgo=");
+
+    const imageGenerationReadItem = result.thread.turns[0]?.items[10];
+    expect(imageGenerationReadItem?.type).toBe("dynamicToolCall");
+    expect(
+      imageGenerationReadItem &&
+        imageGenerationReadItem.type === "dynamicToolCall"
+        ? imageGenerationReadItem.status
+        : null,
+    ).toBe("inProgress");
+    expect(
+      imageGenerationReadItem &&
+        imageGenerationReadItem.type === "dynamicToolCall"
+        ? imageGenerationReadItem.contentItems?.[0]?.type
+        : null,
+    ).toBe("inputImage");
+
+    const rawMessageItem = result.thread.turns[0]?.items[11];
     expect(rawMessageItem?.type).toBe("agentMessage");
     expect(
       rawMessageItem && rawMessageItem.type === "agentMessage"
@@ -958,7 +1007,7 @@ describe("unified provider adapters", () => {
         : null,
     ).toBe("raw assistant text");
 
-    const rawLocalShellItem = result.thread.turns[0]?.items[10];
+    const rawLocalShellItem = result.thread.turns[0]?.items[12];
     expect(rawLocalShellItem?.type).toBe("commandExecution");
     expect(
       rawLocalShellItem && rawLocalShellItem.type === "commandExecution"
@@ -966,7 +1015,7 @@ describe("unified provider adapters", () => {
         : null,
     ).toBe("rtk date");
 
-    const approvalReviewItem = result.thread.turns[0]?.items[11];
+    const approvalReviewItem = result.thread.turns[0]?.items[13];
     expect(approvalReviewItem?.type).toBe("dynamicToolCall");
     expect(
       approvalReviewItem && approvalReviewItem.type === "dynamicToolCall"
@@ -974,7 +1023,7 @@ describe("unified provider adapters", () => {
         : null,
     ).toBe("automaticApprovalReview");
 
-    const elicitationItem = result.thread.turns[0]?.items[12];
+    const elicitationItem = result.thread.turns[0]?.items[14];
     expect(elicitationItem?.type).toBe("dynamicToolCall");
     expect(
       elicitationItem && elicitationItem.type === "dynamicToolCall"

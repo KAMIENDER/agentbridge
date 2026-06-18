@@ -392,6 +392,38 @@ export const RawWebSearchCallItemSchema = z
   })
   .passthrough();
 
+export const ImageGenerationCallStatusSchema = z.enum([
+  "in_progress",
+  "completed",
+  "failed"
+]);
+
+export const ImageGenerationCallItemSchema = z
+  .object({
+    type: z.literal("image_generation_call"),
+    id: NonEmptyStringSchema,
+    status: ImageGenerationCallStatusSchema,
+    result: z.union([z.string(), z.null()]).optional(),
+    revised_prompt: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
+export const ImageGenerationStatusSchema = z.enum([
+  "generating",
+  "completed",
+  "failed"
+]);
+
+export const ImageGenerationItemSchema = z
+  .object({
+    type: z.literal("imageGeneration"),
+    id: NonEmptyStringSchema,
+    status: ImageGenerationStatusSchema,
+    result: z.union([z.string(), z.null()]).optional(),
+    revisedPrompt: z.union([z.string(), z.null()]).optional()
+  })
+  .passthrough();
+
 export const DynamicToolCallOutputTextContentItemSchema = z
   .object({
     type: z.literal("inputText"),
@@ -692,6 +724,8 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   RawResponseMessageItemSchema,
   RawLocalShellCallItemSchema,
   RawWebSearchCallItemSchema,
+  ImageGenerationCallItemSchema,
+  ImageGenerationItemSchema,
   McpToolCallItemSchema,
   DynamicToolCallItemSchema,
   CustomToolCallItemSchema,
