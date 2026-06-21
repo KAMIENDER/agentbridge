@@ -203,6 +203,14 @@ const UnifiedReadThreadEnvelopeSchema = z
   .object({
     ok: z.literal(true),
     thread: UnifiedThreadSchema,
+    turnWindow: z
+      .object({
+        start: z.number().int().nonnegative(),
+        count: z.number().int().nonnegative(),
+        total: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -419,6 +427,14 @@ const SidebarThreadsResponseSchema = z
 const ReadThreadResponseSchema = z
   .object({
     thread: UnifiedThreadSchema,
+    turnWindow: z
+      .object({
+        start: z.number().int().nonnegative(),
+        count: z.number().int().nonnegative(),
+        total: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ReadThreadResponse = z.infer<typeof ReadThreadResponseSchema>;
@@ -922,6 +938,8 @@ export async function readThread(
     includeTurns?: boolean;
     provider?: AgentId;
     payload?: ThreadPayloadMode;
+    turnStart?: number;
+    turnLimit?: number;
   },
 ): Promise<ReadThreadResponse> {
   const params = new URLSearchParams();
@@ -930,6 +948,12 @@ export async function readThread(
   }
   if (typeof options?.includeTurns === "boolean") {
     params.set("includeTurns", options.includeTurns ? "1" : "0");
+  }
+  if (typeof options?.turnStart === "number") {
+    params.set("turnStart", String(options.turnStart));
+  }
+  if (typeof options?.turnLimit === "number") {
+    params.set("turnLimit", String(options.turnLimit));
   }
   params.set("payload", options?.payload ?? getDefaultThreadPayloadMode());
 
@@ -941,6 +965,7 @@ export async function readThread(
 
   return ReadThreadResponseSchema.parse({
     thread: payload.thread,
+    ...(payload.turnWindow ? { turnWindow: payload.turnWindow } : {}),
   });
 }
 
@@ -1066,11 +1091,15 @@ export async function listModels(
 export async function getLiveState(
   threadId: string,
   provider: AgentId,
+  options?: {
+    includeConversationState?: boolean;
+  },
 ): Promise<z.infer<typeof LiveStateResponseSchema>> {
   const result = await runUnifiedCommand({
     kind: "readLiveState",
     provider,
     threadId,
+    includeConversationState: options?.includeConversationState ?? true,
   });
 
   if (result.kind !== "readLiveState") {

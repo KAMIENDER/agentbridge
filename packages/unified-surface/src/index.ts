@@ -987,6 +987,17 @@ export const UnifiedThreadSchema = z
   .strict();
 export type UnifiedThread = z.infer<typeof UnifiedThreadSchema>;
 
+export const UnifiedThreadTurnWindowSchema = z
+  .object({
+    start: NonNegativeIntSchema,
+    count: NonNegativeIntSchema,
+    total: NonNegativeIntSchema
+  })
+  .strict();
+export type UnifiedThreadTurnWindow = z.infer<
+  typeof UnifiedThreadTurnWindowSchema
+>;
+
 export const UnifiedThreadSummarySchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -1127,7 +1138,8 @@ const UnifiedCommandReadLiveStateSchema = z
   .object({
     kind: z.literal("readLiveState"),
     provider: UnifiedProviderIdSchema,
-    threadId: NonEmptyStringSchema
+    threadId: NonEmptyStringSchema,
+    includeConversationState: z.boolean().optional().default(true)
   })
   .strict();
 
@@ -1560,6 +1572,9 @@ export const UnifiedRealtimeThreadStateSchema = z
   .object({
     threadId: NonEmptyStringSchema,
     readThread: z.union([UnifiedThreadSchema, z.null()]),
+    readThreadTurnWindow: z
+      .union([UnifiedThreadTurnWindowSchema, z.null()])
+      .optional(),
     liveState: z
       .object({
         ownerClientId: z.union([z.string(), z.null()]),

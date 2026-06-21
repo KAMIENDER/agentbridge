@@ -323,8 +323,11 @@ function buildThreadIncrementalBase(
   if (baseUpdatedAt === null) {
     return null;
   }
-  const baseTurnCount = read.thread.turns.length;
-  const baseLastTurn = read.thread.turns[baseTurnCount - 1] ?? null;
+  const baseTurnCount = read.turnWindow?.total ?? read.thread.turns.length;
+  const baseLastTurn = read.thread.turns[read.thread.turns.length - 1] ?? null;
+  if (baseTurnCount > 0 && !baseLastTurn) {
+    return null;
+  }
   return {
     baseUpdatedAt,
     baseTurnCount,
@@ -343,22 +346,124 @@ function mergeIncrementalThreadRead(input: {
           ...input.incremental.thread,
           turns: input.baseRead.thread.turns,
         },
+        ...(input.baseRead.turnWindow
+          ? { turnWindow: input.baseRead.turnWindow }
+          : {}),
       };
     case "patch":
+      const patchedTurns = [
+        ...input.baseRead.thread.turns,
+        ...input.incremental.appendTurns,
+      ];
+      const baseWindowStart = input.baseRead.turnWindow?.start ?? 0;
+      const nextWindowTotal =
+        (input.baseRead.turnWindow?.total ??
+          input.baseRead.thread.turns.length) +
+        input.incremental.appendTurns.length;
       return {
         thread: {
           ...input.incremental.thread,
-          turns: [
-            ...input.baseRead.thread.turns,
-            ...input.incremental.appendTurns,
-          ],
+          turns: patchedTurns,
         },
+        ...(input.baseRead.turnWindow
+          ? {
+              turnWindow: {
+                start: baseWindowStart,
+                count: patchedTurns.length,
+                total: nextWindowTotal,
+              },
+            }
+          : {}),
       };
     case "resync":
       return {
         thread: input.incremental.thread,
       };
   }
+}
+
+function mergeOlderThreadWindow(input: {
+  current: ReadThreadResponse;
+  older: ReadThreadResponse;
+}): ReadThreadResponse {
+  if (!input.current.turnWindow || !input.older.turnWindow) {
+    return input.older;
+  }
+
+  const mergedTurns: ConversationTurn[] = [];
+  const seenTurnIds = new Set<string>();
+  for (const turn of [
+    ...input.older.thread.turns,
+    ...input.current.thread.turns,
+  ]) {
+    if (seenTurnIds.has(turn.id)) {
+      continue;
+    }
+    seenTurnIds.add(turn.id);
+    mergedTurns.push(turn);
+  }
+
+  return {
+    thread: {
+      ...input.current.thread,
+      turns: mergedTurns,
+    },
+    turnWindow: {
+      start: input.older.turnWindow.start,
+      count: mergedTurns.length,
+      total: Math.max(input.current.turnWindow.total, input.older.turnWindow.total),
+    },
+  };
+}
+
+function mergeReadThreadWindowStates(input: {
+  current: ReadThreadResponse;
+  incoming: ReadThreadResponse;
+}): ReadThreadResponse {
+  if (input.current.thread.id !== input.incoming.thread.id) {
+    return input.incoming;
+  }
+
+  const currentWindow = input.current.turnWindow ?? null;
+  const incomingWindow = input.incoming.turnWindow ?? null;
+  if (!currentWindow || !incomingWindow) {
+    return input.incoming;
+  }
+
+  const orderedReads = [
+    {
+      response: input.current,
+      start: currentWindow.start,
+    },
+    {
+      response: input.incoming,
+      start: incomingWindow.start,
+    },
+  ].sort((left, right) => left.start - right.start);
+  const seenTurnIds = new Set<string>();
+  const mergedTurns: ConversationTurn[] = [];
+
+  for (const entry of orderedReads) {
+    for (const turn of entry.response.thread.turns) {
+      if (seenTurnIds.has(turn.id)) {
+        continue;
+      }
+      seenTurnIds.add(turn.id);
+      mergedTurns.push(turn);
+    }
+  }
+
+  return {
+    thread: {
+      ...input.incoming.thread,
+      turns: mergedTurns,
+    },
+    turnWindow: {
+      start: Math.min(currentWindow.start, incomingWindow.start),
+      count: mergedTurns.length,
+      total: Math.max(currentWindow.total, incomingWindow.total),
+    },
+  };
 }
 
 interface AppViewSnapshot {
@@ -1060,6 +1165,8 @@ const DEFAULT_EFFORT_OPTIONS = [
 const EFFORT_ORDER: ReadonlyArray<string> = DEFAULT_EFFORT_OPTIONS;
 const INITIAL_VISIBLE_CHAT_ITEMS = 90;
 const VISIBLE_CHAT_ITEMS_STEP = 80;
+const INITIAL_THREAD_TURN_LIMIT = 24;
+const OLDER_THREAD_TURN_BATCH = 24;
 const APP_DEFAULT_VALUE = "__app_default__";
 const ASSUMED_APP_DEFAULT_EFFORT = "medium";
 const AGENT_CACHE_TTL_MS = 30_000;
@@ -2623,7 +2730,10 @@ export function App(): React.JSX.Element {
       visibleItems,
     };
   }, [isGenerating, turns, visibleChatItemLimit]);
-  const hasHiddenChatItems = conversationWindow.hasHidden;
+  const hasUnloadedOlderTurns =
+    (activeReadThreadState?.turnWindow?.start ?? 0) > 0;
+  const hasHiddenChatItems =
+    conversationWindow.hasHidden || hasUnloadedOlderTurns;
   const visibleConversationItems = conversationWindow.visibleItems;
   const visibleConversationItemCount = visibleConversationItems.length;
   const commitLabel = health?.state.gitCommit ?? "unknown";
@@ -3046,6 +3156,9 @@ export function App(): React.JSX.Element {
         threadViewStateCacheRef.current.get(threadId) ?? null;
       const persistentThreadCacheEnabled =
         includeTurns && getDefaultThreadPayloadMode() === "compact";
+      const initialThreadTurnLimit = includeTurns
+        ? INITIAL_THREAD_TURN_LIMIT
+        : undefined;
       const selectedThreadUpdatedAt =
         selectedThreadIdRef.current === threadId
           ? parseThreadUpdatedAt(selectedThread?.updatedAt ?? null)
@@ -3170,6 +3283,9 @@ export function App(): React.JSX.Element {
             read = await readThread(threadId, {
               includeTurns,
               provider: candidateProvider,
+              ...(initialThreadTurnLimit !== undefined
+                ? { turnLimit: initialThreadTurnLimit }
+                : {}),
             });
             threadAgentId = read.thread.provider;
             shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
@@ -3188,6 +3304,9 @@ export function App(): React.JSX.Element {
       if (!read) {
         read = await readThread(threadId, {
           includeTurns,
+          ...(initialThreadTurnLimit !== undefined
+            ? { turnLimit: initialThreadTurnLimit }
+            : {}),
         });
         threadAgentId = read.thread.provider;
         shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
@@ -3215,12 +3334,15 @@ export function App(): React.JSX.Element {
         read = await readThread(threadId, {
           includeTurns: true,
           provider: threadAgentId,
+          turnLimit: INITIAL_THREAD_TURN_LIMIT,
         });
         shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
       }
 
       const live = canReadLiveState
-        ? await getLiveState(threadId, threadAgentId)
+        ? await getLiveState(threadId, threadAgentId, {
+            includeConversationState: !includeTurns,
+          })
         : {
             ok: true as const,
             threadId,
@@ -3233,6 +3355,7 @@ export function App(): React.JSX.Element {
         read = await readThread(threadId, {
           includeTurns: true,
           provider: threadAgentId,
+          turnLimit: INITIAL_THREAD_TURN_LIMIT,
         });
         shouldReadTurns = true;
         shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
@@ -3388,6 +3511,81 @@ export function App(): React.JSX.Element {
       selectedThread?.updatedAt,
     ],
   );
+
+  const loadOlderSelectedThreadTurns = useCallback(async () => {
+    const threadId = selectedThreadIdRef.current;
+    if (!threadId) {
+      return;
+    }
+
+    const cachedState = threadViewStateCacheRef.current.get(threadId) ?? null;
+    const currentRead =
+      readThreadState?.thread.id === threadId
+        ? readThreadState
+        : (cachedState?.readThreadState ?? null);
+    const currentWindow = currentRead?.turnWindow ?? null;
+    if (!currentRead || !currentWindow || currentWindow.start === 0) {
+      return;
+    }
+
+    const nextStart = Math.max(
+      0,
+      currentWindow.start - OLDER_THREAD_TURN_BATCH,
+    );
+    const nextLimit = currentWindow.start - nextStart;
+    if (nextLimit <= 0) {
+      return;
+    }
+
+    try {
+      setError("");
+      const older = await readThread(threadId, {
+        includeTurns: true,
+        provider: currentRead.thread.provider,
+        payload: "compact",
+        turnStart: nextStart,
+        turnLimit: nextLimit,
+      });
+      const merged = mergeOlderThreadWindow({
+        current: currentRead,
+        older,
+      });
+      const nextCachedState = {
+        readThreadState: merged,
+        liveState:
+          cachedState?.liveState ??
+          (liveState?.threadId === threadId ? liveState : null),
+        streamEvents: cachedState?.streamEvents ?? [],
+      };
+      threadViewStateCacheRef.current.set(threadId, nextCachedState);
+      await writeCachedThread({
+        serverBaseUrl: getServerBaseUrl(),
+        response: merged,
+      });
+      if (selectedThreadIdRef.current !== threadId) {
+        return;
+      }
+      setReadThreadState((prev) =>
+        prev?.thread.id === threadId
+          ? mergeOlderThreadWindow({
+              current: prev,
+              older,
+            })
+          : prev,
+      );
+    } catch (error) {
+      setError(toErrorMessage(error));
+    }
+  }, [liveState, readThreadState]);
+
+  const handleShowOlderMessages = useCallback(() => {
+    if (conversationWindow.hasHidden) {
+      setVisibleChatItemLimit((limit) => limit + VISIBLE_CHAT_ITEMS_STEP);
+      return;
+    }
+
+    void loadOlderSelectedThreadTurns();
+  }, [conversationWindow.hasHidden, loadOlderSelectedThreadTurns]);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -3750,6 +3948,9 @@ export function App(): React.JSX.Element {
         threadState.readThread
           ? {
               thread: threadState.readThread,
+              ...(threadState.readThreadTurnWindow
+                ? { turnWindow: threadState.readThreadTurnWindow }
+                : {}),
             }
           : null;
       const nextLiveState: LiveStateResponse = {
@@ -3761,8 +3962,18 @@ export function App(): React.JSX.Element {
       };
       const nextStreamEvents = threadState.streamEvents;
 
+      const existingCachedState =
+        threadViewStateCacheRef.current.get(threadState.threadId) ?? null;
+      const mergedReadThreadState =
+        nextReadThreadState && existingCachedState?.readThreadState
+          ? mergeReadThreadWindowStates({
+              current: existingCachedState.readThreadState,
+              incoming: nextReadThreadState,
+            })
+          : nextReadThreadState;
+
       threadViewStateCacheRef.current.set(threadState.threadId, {
-        readThreadState: nextReadThreadState,
+        readThreadState: mergedReadThreadState,
         liveState: nextLiveState,
         streamEvents: nextStreamEvents,
       });
@@ -3771,7 +3982,14 @@ export function App(): React.JSX.Element {
         return;
       }
 
-      setReadThreadState(nextReadThreadState);
+      setReadThreadState((prev) =>
+        mergedReadThreadState && prev
+          ? mergeReadThreadWindowStates({
+              current: prev,
+              incoming: mergedReadThreadState,
+            })
+          : mergedReadThreadState,
+      );
       setLiveState(nextLiveState);
       setStreamEvents(nextStreamEvents);
     },
@@ -6372,11 +6590,7 @@ export function App(): React.JSX.Element {
                   visibleConversationItems={visibleConversationItems}
                   isChatAtBottom={isChatAtBottom}
                   onSelectThread={handleSelectReferencedThread}
-                  onShowOlder={() => {
-                    setVisibleChatItemLimit(
-                      (limit) => limit + VISIBLE_CHAT_ITEMS_STEP,
-                    );
-                  }}
+                  onShowOlder={handleShowOlderMessages}
                   onScrollToBottom={() => {
                     scrollChatToBottom();
                     isChatAtBottomRef.current = true;

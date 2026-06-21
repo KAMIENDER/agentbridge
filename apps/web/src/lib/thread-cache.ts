@@ -9,6 +9,14 @@ const CACHE_RECORD_VERSION = 1;
 const CachedReadThreadResponseSchema = z
   .object({
     thread: UnifiedThreadSchema,
+    turnWindow: z
+      .object({
+        start: z.number().int().nonnegative(),
+        count: z.number().int().nonnegative(),
+        total: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

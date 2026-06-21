@@ -49,6 +49,11 @@ import {
   ThreadIncrementalReadQuerySchema,
   buildIncrementalThreadRead,
 } from "./thread-incremental.js";
+import {
+  DEFAULT_THREAD_TURN_WINDOW_LIMIT,
+  ThreadTurnWindowQuerySchema,
+  applyThreadTurnWindow,
+} from "./thread-window.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
@@ -1180,6 +1185,7 @@ async function buildRealtimeThreadState(input: {
               kind: "readLiveState",
               provider,
               threadId: input.threadId,
+              includeConversationState: false,
             })
           : {
               kind: "readLiveState" as const,
@@ -1237,6 +1243,16 @@ async function buildRealtimeThreadState(input: {
     }
 
     threadIndex.register(readThread.id, readThread.provider);
+    const windowedReadThread = applyThreadTurnWindow({
+      thread: readThread,
+      query: {
+        turnLimit: DEFAULT_THREAD_TURN_WINDOW_LIMIT,
+      },
+    });
+    const compactReadThread = compactUnifiedThreadForPayload(
+      windowedReadThread.thread,
+      "compact",
+    );
 
     let streamResult:
       | Awaited<ReturnType<typeof adapter.execute>>
@@ -1279,7 +1295,8 @@ async function buildRealtimeThreadState(input: {
 
     return UnifiedRealtimeThreadStateSchema.parse({
       threadId: input.threadId,
-      readThread,
+      readThread: compactReadThread,
+      readThreadTurnWindow: windowedReadThread.turnWindow,
       liveState: {
         ownerClientId: liveResult.ownerClientId,
         conversationState: null,
@@ -2019,6 +2036,28 @@ const server = http.createServer(async (req, res) => {
         incrementalQueryResult && incrementalQueryResult.success
           ? incrementalQueryResult.data
           : null;
+      const turnWindowQueryResult = ThreadTurnWindowQuerySchema.safeParse({
+        ...(url.searchParams.get("turnStart") !== null
+          ? { turnStart: url.searchParams.get("turnStart") ?? "" }
+          : {}),
+        ...(url.searchParams.get("turnLimit") !== null
+          ? { turnLimit: url.searchParams.get("turnLimit") ?? "" }
+          : {}),
+      });
+      if (!turnWindowQueryResult.success) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidThreadTurnWindow",
+            message:
+              "Thread turn window requires a positive turnLimit and optional non-negative turnStart",
+            details: {
+              threadId,
+            },
+          },
+        });
+        return;
+      }
       const knownProviders = threadIndex.providers(threadId);
       const resolvedProvider = threadIndex.resolve(threadId);
       let provider = providerFromQuery ?? resolvedProvider;
@@ -2142,9 +2181,16 @@ const server = http.createServer(async (req, res) => {
             }),
           });
         } else {
+          const windowedThread = applyThreadTurnWindow({
+            thread,
+            query: turnWindowQueryResult.data,
+          });
           jsonResponse(res, 200, {
             ok: true,
-            thread,
+            thread: windowedThread.thread,
+            ...(windowedThread.turnWindow
+              ? { turnWindow: windowedThread.turnWindow }
+              : {}),
           });
         }
       } catch (error) {

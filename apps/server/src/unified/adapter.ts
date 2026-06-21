@@ -471,9 +471,10 @@ function createHandlerTable(
         kind: "readLiveState",
         threadId: command.threadId,
         ownerClientId: liveState.ownerClientId,
-        conversationState: liveState.conversationState
-          ? mapThread(provider, liveState.conversationState)
-          : null,
+        conversationState:
+          command.includeConversationState && liveState.conversationState
+            ? mapThread(provider, liveState.conversationState)
+            : null,
         ...(liveState.liveStateError
           ? { liveStateError: liveState.liveStateError }
           : {}),
