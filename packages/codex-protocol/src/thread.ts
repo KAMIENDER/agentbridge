@@ -559,6 +559,14 @@ export const RawOtherItemSchema = z
   })
   .passthrough();
 
+export const AgentReasoningSectionBreakItemSchema = z
+  .object({
+    type: z.literal("agent_reasoning_section_break"),
+    item_id: z.string().optional(),
+    summary_index: NonNegativeIntSchema.optional()
+  })
+  .passthrough();
+
 export const AutomaticApprovalReviewItemSchema = z
   .object({
     type: z.literal("automaticApprovalReview"),
@@ -737,6 +745,7 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   GhostSnapshotItemSchema,
   RawCompactionItemSchema,
   RawOtherItemSchema,
+  AgentReasoningSectionBreakItemSchema,
   AutomaticApprovalReviewItemSchema,
   McpServerElicitationItemSchema,
   CollabAgentToolCallItemSchema,

@@ -330,6 +330,32 @@ describe("unified provider adapters", () => {
     });
   });
 
+  it("passes null cwd through createThread", async () => {
+    const createThread = vi.fn(
+      async (_input: Parameters<AgentAdapter["createThread"]>[0]) => ({
+        threadId: SAMPLE_THREAD.id,
+        thread: SAMPLE_THREAD_LIST_ITEM,
+      }),
+    );
+    const adapter: AgentAdapter = {
+      ...createCodexAdapter(),
+      createThread,
+    };
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "createThread",
+        provider: "codex",
+        cwd: null,
+      }),
+    );
+
+    expect(createThread).toHaveBeenCalledWith({
+      cwd: null,
+    });
+  });
+
   it("has full command handler coverage for both providers", () => {
     const codexUnified = new AgentUnifiedProviderAdapter(
       "codex",
@@ -716,6 +742,99 @@ describe("unified provider adapters", () => {
     expect(result.thread.turns[0]?.items[0]?.type).toBe("steered");
   });
 
+  it("maps agent reasoning section break turn items into unified items", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                type: "agent_reasoning_section_break",
+                item_id: "reasoning-1",
+                summary_index: 1,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    const sectionBreakItem = result.thread.turns[0]?.items[0];
+    expect(sectionBreakItem?.type).toBe("agentReasoningSectionBreak");
+    expect(
+      sectionBreakItem &&
+        sectionBreakItem.type === "agentReasoningSectionBreak"
+        ? sectionBreakItem.summaryIndex
+        : null,
+    ).toBe(1);
+  });
+
+  it("maps imageGeneration turn items into unified items", async () => {
+    const adapter = createCodexAdapter();
+    adapter.readThread = async () => ({
+      thread: {
+        ...SAMPLE_THREAD,
+        turns: [
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [
+              {
+                id: "item-image-generation",
+                type: "imageGeneration",
+                status: "completed",
+                revisedPrompt: "A compact product screenshot",
+                result: "iVBORw0KGgo=",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const unified = new AgentUnifiedProviderAdapter("codex", adapter);
+
+    const result = await unified.execute(
+      UnifiedCommandSchema.parse({
+        kind: "readThread",
+        provider: "codex",
+        threadId: SAMPLE_THREAD.id,
+        includeTurns: true,
+      }),
+    );
+
+    expect(result.kind).toBe("readThread");
+    if (result.kind !== "readThread") {
+      return;
+    }
+
+    const imageGenerationItem = result.thread.turns[0]?.items[0];
+    expect(imageGenerationItem?.type).toBe("imageGeneration");
+    expect(
+      imageGenerationItem && imageGenerationItem.type === "imageGeneration"
+        ? imageGenerationItem.imageBase64
+        : null,
+    ).toBe("iVBORw0KGgo=");
+  });
+
   it("maps dynamicToolCall turn items and richer user message parts into unified items", async () => {
     const adapter = createCodexAdapter();
     adapter.readThread = async () => ({
@@ -985,19 +1104,19 @@ describe("unified provider adapters", () => {
     ).toBe("data:image/png;base64,iVBORw0KGgo=");
 
     const imageGenerationReadItem = result.thread.turns[0]?.items[10];
-    expect(imageGenerationReadItem?.type).toBe("dynamicToolCall");
+    expect(imageGenerationReadItem?.type).toBe("imageGeneration");
     expect(
       imageGenerationReadItem &&
-        imageGenerationReadItem.type === "dynamicToolCall"
+        imageGenerationReadItem.type === "imageGeneration"
         ? imageGenerationReadItem.status
         : null,
-    ).toBe("inProgress");
+    ).toBe("generating");
     expect(
       imageGenerationReadItem &&
-        imageGenerationReadItem.type === "dynamicToolCall"
-        ? imageGenerationReadItem.contentItems?.[0]?.type
+        imageGenerationReadItem.type === "imageGeneration"
+        ? imageGenerationReadItem.imageBase64
         : null,
-    ).toBe("inputImage");
+    ).toBe("iVBORw0KGgo=");
 
     const rawMessageItem = result.thread.turns[0]?.items[11];
     expect(rawMessageItem?.type).toBe("agentMessage");

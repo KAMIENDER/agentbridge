@@ -233,6 +233,13 @@ interface CachedThreadViewState {
   streamEvents: StreamEventsResponse["events"];
 }
 
+interface ConversationDraft {
+  id: string;
+  provider: AgentId;
+  projectPath: string | null;
+  createdAt: number;
+}
+
 interface AgentCacheEntry {
   value: AgentsResponse;
   fetchedAt: number;
@@ -476,6 +483,13 @@ function buildThreadsSignature(threads: Thread[]): string[] {
   return threads.map(buildThreadSignature);
 }
 
+let conversationDraftSequence = 0;
+
+function createConversationDraftId(): string {
+  conversationDraftSequence += 1;
+  return `conversation-draft-${String(conversationDraftSequence)}`;
+}
+
 function buildOptimisticThreadSummary(
   threadId: string,
   provider: AgentId,
@@ -578,6 +592,7 @@ function buildThreadPreviewFromReadThread(
         case "dynamicToolCall":
         case "collabAgentToolCall":
         case "imageView":
+        case "imageGeneration":
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "remoteTaskCreated":
@@ -748,6 +763,14 @@ function shouldRenderConversationItem(item: ConversationTurnItem): boolean {
     case "reasoning": {
       return (item.summary?.length ?? 0) > 0 || Boolean(item.text);
     }
+    case "agentReasoningSectionBreak":
+      return false;
+    case "imageGeneration":
+      return (
+        item.status !== "completed" ||
+        Boolean(item.revisedPrompt) ||
+        Boolean(item.imageBase64)
+      );
     case "userInputResponse":
       return Object.values(item.answers).some((answers) => answers.length > 0);
     default:
@@ -1370,6 +1393,7 @@ function IconBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-label={title}
       variant="ghost"
       size="icon"
       className={`h-8 w-8 rounded-lg ${
@@ -1482,6 +1506,8 @@ export function App(): React.JSX.Element {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
     initialSnapshot?.selectedThreadId ?? initialUiState.threadId,
   );
+  const [conversationDraft, setConversationDraft] =
+    useState<ConversationDraft | null>(null);
   const [liveState, setLiveState] = useState<LiveStateResponse | null>(
     initialSnapshot?.liveState ?? null,
   );
@@ -1583,6 +1609,7 @@ export function App(): React.JSX.Element {
 
   /* Refs */
   const selectedThreadIdRef = useRef<string | null>(null);
+  const conversationDraftRef = useRef<ConversationDraft | null>(null);
   const activeTabRef = useRef<"chat" | "debug">(
     initialTab,
   );
@@ -1595,6 +1622,7 @@ export function App(): React.JSX.Element {
   const hasHydratedAgentSelectionRef = useRef(false);
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
   const optimisticSelectedThreadIdsRef = useRef<Set<string>>(new Set());
+  const freshlyCreatedThreadIdsRef = useRef<Set<string>>(new Set());
   const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const selectedThreadLoadRequestIdRef = useRef(0);
   const loadSelectedThreadRef = useRef<
@@ -1632,6 +1660,7 @@ export function App(): React.JSX.Element {
     () => threads.find((t) => t.id === selectedThreadId) ?? null,
     [threads, selectedThreadId],
   );
+  const activeConversationDraft = selectedThreadId ? null : conversationDraft;
   const agentsById = useMemo(() => {
     const map: Partial<Record<AgentId, AgentDescriptor>> = {};
     for (const descriptor of agentDescriptors) {
@@ -1857,6 +1886,8 @@ export function App(): React.JSX.Element {
         .sort(compareThreadsByRecency),
     [visibleSidebarThreads],
   );
+  const projectlessConversationDraft =
+    conversationDraft?.projectPath === null ? conversationDraft : null;
   const activeLiveState = useMemo(
     () => (liveState?.threadId === selectedThreadId ? liveState : null),
     [liveState, selectedThreadId],
@@ -1971,8 +2002,11 @@ export function App(): React.JSX.Element {
   ]);
 
   const activeThreadAgentId: AgentId = useMemo(
-    () => resolvedSelectedThreadProvider ?? selectedAgentId,
-    [resolvedSelectedThreadProvider, selectedAgentId],
+    () =>
+      resolvedSelectedThreadProvider ??
+      activeConversationDraft?.provider ??
+      selectedAgentId,
+    [activeConversationDraft?.provider, resolvedSelectedThreadProvider, selectedAgentId],
   );
   const hasResolvedSelectedThreadProvider =
     !selectedThreadId || resolvedSelectedThreadProvider !== null;
@@ -2011,6 +2045,12 @@ export function App(): React.JSX.Element {
     selectedAgentDescriptor,
     "createThread",
   );
+  const canShowCreateConversationControl =
+    !isCoreLoading &&
+    !sidebarProviderConnectionState &&
+    !isSidebarSearchActive &&
+    sidebarArchiveMode === "active" &&
+    availableAgentIds.length > 0;
   const showUsageBadges =
     activeThreadAgentId === "codex" && !DISABLE_RATE_LIMITS;
   const sessionTokenUsage = useMemo(() => {
@@ -2244,6 +2284,7 @@ export function App(): React.JSX.Element {
       "dynamicToolCall",
       "collabAgentToolCall",
       "imageView",
+      "imageGeneration",
       "enteredReviewMode",
       "exitedReviewMode",
       "remoteTaskCreated",
@@ -2309,6 +2350,8 @@ export function App(): React.JSX.Element {
       if (window.location.pathname !== nextPath) {
         window.history.pushState(null, "", nextPath);
       }
+      conversationDraftRef.current = null;
+      setConversationDraft(null);
       setSelectedThreadId(threadId);
       setActiveTab("chat");
       closeMobileSidebar();
@@ -2377,9 +2420,11 @@ export function App(): React.JSX.Element {
     const nt = await sidebarPromise;
     const incomingThreads = sortThreadsByRecency(nt.rows);
     const optimisticSelectedThreadIds = optimisticSelectedThreadIdsRef.current;
+    const freshlyCreatedThreadIds = freshlyCreatedThreadIdsRef.current;
     if (optimisticSelectedThreadIds.size > 0) {
       for (const thread of incomingThreads) {
         optimisticSelectedThreadIds.delete(thread.id);
+        freshlyCreatedThreadIds.delete(thread.id);
       }
     }
     const nextThreadProviders = new Map(threadProviderByIdRef.current);
@@ -2587,6 +2632,9 @@ export function App(): React.JSX.Element {
       if (cur) {
         return cur;
       }
+      if (conversationDraftRef.current) {
+        return cur;
+      }
       if (selectedThreadIdRef.current) {
         const listedThreadStillExists = incomingThreads.some(
           (threadSummary) => threadSummary.id === selectedThreadIdRef.current,
@@ -2745,6 +2793,7 @@ export function App(): React.JSX.Element {
         throw new Error(`Unable to load thread ${threadId}`);
       }
 
+      freshlyCreatedThreadIdsRef.current.delete(threadId);
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
       const descriptor = agentsById[threadAgentId];
@@ -2989,7 +3038,9 @@ export function App(): React.JSX.Element {
 
   const clearServerScopedState = useCallback(() => {
     selectedThreadIdRef.current = null;
+    conversationDraftRef.current = null;
     setSelectedThreadId(null);
+    setConversationDraft(null);
     setThreads([]);
     setThreadListErrors({ codex: null, opencode: null });
     setLiveState(null);
@@ -3123,9 +3174,11 @@ export function App(): React.JSX.Element {
     (coreState: UnifiedRealtimeCoreState) => {
       const incomingThreads = sortThreadsByRecency(coreState.sidebar.rows);
       const optimisticSelectedThreadIds = optimisticSelectedThreadIdsRef.current;
+      const freshlyCreatedThreadIds = freshlyCreatedThreadIdsRef.current;
       if (optimisticSelectedThreadIds.size > 0) {
         for (const thread of incomingThreads) {
           optimisticSelectedThreadIds.delete(thread.id);
+          freshlyCreatedThreadIds.delete(thread.id);
         }
       }
 
@@ -3227,6 +3280,9 @@ export function App(): React.JSX.Element {
         if (cur) {
           return cur;
         }
+        if (conversationDraftRef.current) {
+          return cur;
+        }
         if (selectedThreadIdRef.current) {
           const listedThreadStillExists = incomingThreads.some(
             (threadSummary) => threadSummary.id === selectedThreadIdRef.current,
@@ -3260,9 +3316,15 @@ export function App(): React.JSX.Element {
   const applyRealtimeThreadState = useCallback(
     (threadState: UnifiedRealtimeThreadState) => {
       if (threadState.readThread) {
+        freshlyCreatedThreadIdsRef.current.delete(threadState.readThread.id);
         threadProviderByIdRef.current.set(
           threadState.readThread.id,
           threadState.readThread.provider,
+        );
+      }
+      if (threadState.liveState.conversationState) {
+        freshlyCreatedThreadIdsRef.current.delete(
+          threadState.liveState.conversationState.id,
         );
       }
 
@@ -3336,6 +3398,10 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    conversationDraftRef.current = conversationDraft;
+  }, [conversationDraft]);
+
+  useEffect(() => {
     const socket = realtimeSocketRef.current;
     if (!socket) {
       return;
@@ -3380,6 +3446,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const onPopState = () => {
       const next = parseUiStateFromPath(window.location.pathname);
+      conversationDraftRef.current = null;
+      setConversationDraft(null);
       setSelectedThreadId(next.threadId);
       setActiveTab(next.tab);
     };
@@ -3543,6 +3611,13 @@ export function App(): React.JSX.Element {
       setLiveState(cachedState.liveState);
       setReadThreadState(cachedState.readThreadState);
       setStreamEvents(cachedState.streamEvents);
+      if (
+        freshlyCreatedThreadIdsRef.current.has(selectedThreadId) ||
+        (cachedState.readThreadState?.thread.turns.length === 0 &&
+          cachedState.streamEvents.length === 0)
+      ) {
+        return;
+      }
     } else {
       setLiveState(null);
       setReadThreadState(null);
@@ -3896,19 +3971,44 @@ export function App(): React.JSX.Element {
 
         let threadId = selectedThreadId;
         let threadAgentId = activeThreadAgentId;
+        const draftConversationForSend = activeConversationDraft;
+        let createdThreadFromDraft = false;
         let threadConversationStateForSend:
           | NonNullable<ReadThreadResponse["thread"]>
           | null = conversationState;
 
         // Auto-create a thread if none is selected.
         if (!threadId) {
+          threadAgentId = draftConversationForSend?.provider ?? selectedAgentId;
+          const draftProjectPath = draftConversationForSend?.projectPath;
           const created = await createThread({
-            agentId: selectedAgentId,
+            agentId: threadAgentId,
+            ...(draftProjectPath === null
+              ? { cwd: null }
+              : draftProjectPath
+                ? { cwd: draftProjectPath }
+                : {}),
           });
           threadId = created.threadId;
-          threadAgentId = selectedAgentId;
           threadProviderByIdRef.current.set(threadId, threadAgentId);
           optimisticSelectedThreadIdsRef.current.add(threadId);
+          freshlyCreatedThreadIdsRef.current.add(threadId);
+          createdThreadFromDraft = true;
+          const optimisticReadThreadState: ReadThreadResponse = {
+            thread: created.thread,
+          };
+          const optimisticLiveState: LiveStateResponse = {
+            ok: true,
+            threadId,
+            ownerClientId: null,
+            conversationState: created.thread,
+            liveStateError: null,
+          };
+          threadViewStateCacheRef.current.set(threadId, {
+            readThreadState: optimisticReadThreadState,
+            liveState: optimisticLiveState,
+            streamEvents: [],
+          });
           upsertSidebarThread(
             buildOptimisticThreadSummary(
               threadId,
@@ -3916,6 +4016,11 @@ export function App(): React.JSX.Element {
               created.thread,
             ),
           );
+          conversationDraftRef.current = null;
+          setConversationDraft(null);
+          setReadThreadState(optimisticReadThreadState);
+          setLiveState(optimisticLiveState);
+          setStreamEvents([]);
           setSelectedThreadId(threadId);
           selectedThreadIdRef.current = threadId;
           threadConversationStateForSend = created.thread;
@@ -3964,7 +4069,11 @@ export function App(): React.JSX.Element {
               }
             : {}),
         });
-        void refreshAll();
+        if (createdThreadFromDraft) {
+          void loadCoreData();
+        } else {
+          void refreshAll();
+        }
       } catch (e) {
         setError(toErrorMessage(e));
       } finally {
@@ -3974,12 +4083,14 @@ export function App(): React.JSX.Element {
     [
       activeThreadAgentId,
       activeOwnerClientId,
+      activeConversationDraft,
       canSendMessageForActiveAgent,
       canSendToActiveThreadOwner,
       conversationState,
       hasActiveThreadConversationState,
       hasResolvedSelectedThreadProvider,
       isModeSyncing,
+      loadCoreData,
       models,
       modes,
       refreshAll,
@@ -4256,11 +4367,11 @@ export function App(): React.JSX.Element {
     [],
   );
 
-  const createNewThread = useCallback(
-    async (projectPath: string, agentId?: AgentId) => {
-      const trimmedProjectPath = projectPath.trim();
+  const startConversationDraft = useCallback(
+    (projectPath: string | null, agentId?: AgentId) => {
       const targetAgentId = agentId ?? selectedAgentId;
-      if (!trimmedProjectPath) {
+      const cwd = projectPath === null ? null : projectPath.trim();
+      if (cwd !== null && cwd.length === 0) {
         setError("Cannot create thread: missing project path");
         return;
       }
@@ -4270,45 +4381,39 @@ export function App(): React.JSX.Element {
         );
         return;
       }
-      setIsBusy(true);
-      try {
-        setError("");
-        const created = await createThread({
-          cwd: trimmedProjectPath,
-          agentId: targetAgentId,
-        });
-        threadProviderByIdRef.current.set(created.threadId, targetAgentId);
-        optimisticSelectedThreadIdsRef.current.add(created.threadId);
-        upsertSidebarThread(
-          buildOptimisticThreadSummary(
-            created.threadId,
-            targetAgentId,
-            created.thread,
-          ),
-        );
-        setSelectedThreadId(created.threadId);
-        selectedThreadIdRef.current = created.threadId;
-        closeMobileSidebar();
-        await refreshAll();
-      } catch (e) {
-        setError(toErrorMessage(e));
-      } finally {
-        setIsBusy(false);
-      }
+
+      const draft: ConversationDraft = {
+        id: createConversationDraftId(),
+        provider: targetAgentId,
+        projectPath: cwd,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      conversationDraftRef.current = draft;
+      selectedThreadIdRef.current = null;
+      setConversationDraft(draft);
+      setSelectedThreadId(null);
+      setSelectedAgentId(targetAgentId);
+      setLiveState(null);
+      setReadThreadState(null);
+      setStreamEvents([]);
+      setIsSelectedThreadLoading(false);
+      setActiveTab("chat");
+      setError("");
+      closeMobileSidebar();
     },
-    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId, upsertSidebarThread],
+    [agentsById, closeMobileSidebar, selectedAgentId],
   );
 
   const createThreadForSingleAgent = useCallback(
-    (projectPath: string) => {
+    (projectPath: string | null) => {
       const onlyAgentId = availableAgentIds[0];
       if (!onlyAgentId) {
         setError("Cannot create thread: no enabled agent");
         return;
       }
-      void createNewThread(projectPath, onlyAgentId);
+      startConversationDraft(projectPath, onlyAgentId);
     },
-    [availableAgentIds, createNewThread],
+    [availableAgentIds, startConversationDraft],
   );
 
   const renderSidebarThreadRow = useCallback(
@@ -4350,6 +4455,8 @@ export function App(): React.JSX.Element {
           <Button
             type="button"
             onClick={() => {
+              conversationDraftRef.current = null;
+              setConversationDraft(null);
               setSelectedThreadId(thread.id);
               closeMobileSidebar();
             }}
@@ -4424,6 +4531,79 @@ export function App(): React.JSX.Element {
       sidebarArchiveMode,
     ],
   );
+
+  const renderConversationDraftRow = (
+    draft: ConversationDraft | null,
+    colorAccent: string | null = null,
+  ): React.JSX.Element | null => {
+    if (!draft) {
+      return null;
+    }
+    const isSelected = selectedThreadId === null;
+    const draftAgentLabel = agentsById[draft.provider]?.label ?? "Agent";
+
+    return (
+      <div
+        key={draft.id}
+        className={`group/thread flex w-full min-w-0 items-stretch rounded-xl transition-colors ${
+          isSelected
+            ? "bg-muted/90 text-foreground shadow-sm"
+            : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+        }`}
+      >
+        <Button
+          type="button"
+          onClick={() => {
+            selectedThreadIdRef.current = null;
+            setSelectedThreadId(null);
+            setSelectedAgentId(draft.provider);
+            setActiveTab("chat");
+            setError("");
+            closeMobileSidebar();
+          }}
+          variant="ghost"
+          className="min-w-0 h-auto flex-1 justify-between gap-2 rounded-xl rounded-r-md px-2.5 py-1.5 text-left text-[13px] tracking-tight font-normal text-inherit hover:bg-transparent hover:text-inherit"
+        >
+          <span className="min-w-0 flex-1 flex items-center gap-1.5 truncate leading-5">
+            {colorAccent && (
+              <span
+                className="shrink-0 w-1 h-3.5 rounded-full"
+                style={{ backgroundColor: colorAccent }}
+              />
+            )}
+            {showProviderIcons && (
+              <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                <AgentFavicon
+                  agentId={draft.provider}
+                  label={draftAgentLabel}
+                  className="h-3.5 w-3.5"
+                />
+              </span>
+            )}
+            <span className="truncate">New thread</span>
+          </span>
+          <span className="shrink-0 text-[10px] text-muted-foreground/50">
+            {formatCompactRelativeTime(draft.createdAt)}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          title="Discard draft"
+          aria-label="Discard draft"
+          onClick={(event) => {
+            event.stopPropagation();
+            conversationDraftRef.current = null;
+            setConversationDraft(null);
+          }}
+          className="h-auto w-7 shrink-0 rounded-xl rounded-l-md text-muted-foreground/45 opacity-70 hover:bg-muted/80 hover:text-foreground group-hover/thread:opacity-100"
+        >
+          <X size={12} />
+        </Button>
+      </div>
+    );
+  };
 
   const beginOpenSidebarSwipe = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
@@ -4702,9 +4882,7 @@ export function App(): React.JSX.Element {
                     className="rounded-full"
                     disabled={isBusy || !canCreateThreadForSelectedAgent}
                     onClick={() => {
-                      const defaultProjectPath =
-                        selectedAgentDescriptor?.projectDirectories[0] ?? ".";
-                      createThreadForSingleAgent(defaultProjectPath);
+                      createThreadForSingleAgent(null);
                     }}
                   >
                     <Plus size={13} className="mr-1.5" />
@@ -4745,9 +4923,7 @@ export function App(): React.JSX.Element {
                             ) {
                               return;
                             }
-                            const defaultProjectPath =
-                              agentsById[agentId]?.projectDirectories[0] ?? ".";
-                            void createNewThread(defaultProjectPath, agentId);
+                            startConversationDraft(null, agentId);
                           }}
                         >
                           <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
@@ -4772,11 +4948,17 @@ export function App(): React.JSX.Element {
               </div>
             )}
             {groupedThreads.map((group) => {
+              const projectDraft =
+                conversationDraft?.projectPath &&
+                group.projectPaths.includes(conversationDraft.projectPath)
+                  ? conversationDraft
+                  : null;
               const hasSelectedThread = group.threads.some(
                 (thread) => thread.id === selectedThreadId,
               );
+              const hasActiveDraft = projectDraft !== null;
               const hasExplicitState = group.key in sidebarCollapsedGroups;
-              const isCollapsed = hasSelectedThread
+              const isCollapsed = hasSelectedThread || hasActiveDraft
                 ? false
                 : hasExplicitState
                   ? Boolean(sidebarCollapsedGroups[group.key])
@@ -4988,7 +5170,7 @@ export function App(): React.JSX.Element {
                                 ) {
                                   return;
                                 }
-                                void createNewThread(
+                                startConversationDraft(
                                   group.projectPath,
                                   agentId,
                                 );
@@ -5010,7 +5192,8 @@ export function App(): React.JSX.Element {
                   </div>
                   {!isCollapsed && (
                     <div className="space-y-1 pl-5 pt-0.5">
-                      {group.threads.length === 0 && (
+                      {renderConversationDraftRow(projectDraft, colorAccent)}
+                      {group.threads.length === 0 && !projectDraft && (
                         <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
                           No threads yet
                         </div>
@@ -5023,12 +5206,95 @@ export function App(): React.JSX.Element {
                 </div>
               );
             })}
-            {conversationThreads.length > 0 && (
+            {(conversationThreads.length > 0 ||
+              projectlessConversationDraft ||
+              canShowCreateConversationControl) && (
               <div className="space-y-1 pt-2">
-                <div className="px-2 text-[11px] font-medium text-muted-foreground/60">
-                  {CODEX_PROJECTLESS_SECTION_LABEL}
+                <div className="flex items-center justify-between gap-1 px-2">
+                  <div className="text-[11px] font-medium text-muted-foreground/60">
+                    {CODEX_PROJECTLESS_SECTION_LABEL}
+                  </div>
+                  {canShowCreateConversationControl &&
+                    (availableAgentIds.length <= 1 ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-muted"
+                        title={`New ${selectedAgentLabel} conversation`}
+                        aria-label={`New ${selectedAgentLabel} conversation`}
+                        disabled={isBusy || !canCreateThreadForSelectedAgent}
+                        onClick={() => {
+                          createThreadForSingleAgent(null);
+                        }}
+                      >
+                        <Plus size={13} />
+                      </Button>
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-muted"
+                            title="New conversation"
+                            aria-label="New conversation"
+                            disabled={
+                              isBusy ||
+                              !availableAgentIds.some((agentId) =>
+                                canUseFeature(agentsById[agentId], "createThread"),
+                              )
+                            }
+                          >
+                            <Plus size={13} />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" sideOffset={6}>
+                          {availableAgentIds.map((agentId) => (
+                            <DropdownMenuItem
+                              key={agentId}
+                              disabled={
+                                !canUseFeature(
+                                  agentsById[agentId],
+                                  "createThread",
+                                )
+                              }
+                              onSelect={() => {
+                                if (
+                                  !canUseFeature(
+                                    agentsById[agentId],
+                                    "createThread",
+                                  )
+                                ) {
+                                  return;
+                                }
+                                startConversationDraft(null, agentId);
+                              }}
+                            >
+                              <span className="shrink-0 h-4 w-4 rounded-sm bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
+                                <AgentFavicon
+                                  agentId={agentId}
+                                  label={agentsById[agentId]?.label ?? "Agent"}
+                                  className="h-3.5 w-3.5"
+                                />
+                              </span>
+                              New {agentsById[agentId]?.label ?? agentId} conversation
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ))}
                 </div>
                 <div className="space-y-1 pl-5 pt-0.5">
+                  {projectlessConversationDraft &&
+                    renderConversationDraftRow(projectlessConversationDraft)}
+                  {conversationThreads.length === 0 &&
+                    !projectlessConversationDraft && (
+                    <div className="px-2.5 py-1 text-[11px] text-muted-foreground/70">
+                      No conversations yet
+                    </div>
+                  )}
                   {conversationThreads.map((thread) =>
                     renderSidebarThreadRow(thread, null),
                   )}
@@ -5297,8 +5563,12 @@ export function App(): React.JSX.Element {
                 <div className="text-sm font-medium truncate leading-5 flex items-center gap-1.5">
                   {selectedThread
                     ? threadLabel(selectedThread)
+                    : activeConversationDraft
+                      ? "New thread"
                     : "No thread selected"}
-                  {selectedThread && activeAgentLabel && showProviderIcons && (
+                  {(selectedThread || activeConversationDraft) &&
+                    activeAgentLabel &&
+                    showProviderIcons && (
                     <span className="shrink-0 h-5 w-5 rounded-md bg-muted/30 ring-1 ring-border/60 flex items-center justify-center overflow-hidden">
                       <AgentFavicon
                         agentId={activeThreadAgentId}
@@ -5656,7 +5926,9 @@ export function App(): React.JSX.Element {
 
                 {/* Conversation */}
                 <ChatTimeline
-                  selectedThreadId={selectedThreadId}
+                  selectedThreadId={
+                    selectedThreadId ?? activeConversationDraft?.id ?? null
+                  }
                   isLoading={
                     isSelectedThreadLoading && conversationState === null
                   }
@@ -5745,7 +6017,7 @@ export function App(): React.JSX.Element {
                             isBusy={isBusy}
                             isGenerating={isGenerating}
                             placeholder={
-                              selectedThreadId
+                              selectedThreadId || activeConversationDraft
                                 ? `Message ${activeAgentLabel}…`
                                 : `Message ${selectedAgentLabel}…`
                             }

@@ -32,7 +32,7 @@ export interface AgentListThreadsInput {
 }
 
 export interface AgentCreateThreadInput {
-  cwd?: string;
+  cwd?: string | null;
   model?: string;
   modelProvider?: string;
   personality?: string;

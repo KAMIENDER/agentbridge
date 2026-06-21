@@ -60,7 +60,7 @@ export interface ListThreadsAllOptions {
 }
 
 export interface StartThreadOptions {
-  cwd: string;
+  cwd?: string | null;
   model?: string;
   modelProvider?: string;
   personality?: string;

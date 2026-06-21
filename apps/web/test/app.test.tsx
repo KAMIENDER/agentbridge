@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  UnifiedCommandSchema,
   UnifiedRealtimeClientMessageSchema,
   UnifiedRealtimeCoreStateSchema,
   UnifiedRealtimeServerMessageSchema,
+  type UnifiedCommand,
   type UnifiedRealtimeClientMessage,
   type UnifiedRealtimeCoreState,
   type UnifiedRealtimeServerMessage,
@@ -539,6 +541,7 @@ function jsonErrorResponse(
 
 beforeEach(() => {
   MockRealtimeSocket.reset();
+  vi.mocked(fetch).mockClear();
   window.history.replaceState(null, "", "/");
   localStorageBacking.clear();
 
@@ -685,13 +688,7 @@ vi.stubGlobal(
     }
 
     if (pathname === "/api/unified/command") {
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as {
-            kind: string;
-            provider: ProviderId;
-            threadId?: string;
-          })
-        : { kind: "unknown", provider: "codex" as const };
+      const body = UnifiedCommandSchema.parse(JSON.parse(String(init?.body)));
 
       if (body.kind === "listProjectDirectories") {
         return jsonResponse({
@@ -742,6 +739,26 @@ vi.stubGlobal(
         });
       }
 
+      if (body.kind === "createThread") {
+        const threadId = "created-thread";
+        const thread = {
+          ...buildConversationStateFixture(threadId, "gpt-5.3-codex", {
+            provider: body.provider,
+          }),
+          ...(body.cwd ? { cwd: body.cwd } : {}),
+          source: body.provider,
+        } satisfies UnifiedThreadFixture;
+
+        return jsonResponse({
+          ok: true,
+          result: {
+            kind: "createThread",
+            threadId,
+            thread,
+          },
+        });
+      }
+
       return jsonResponse({
         ok: true,
         result: {
@@ -769,11 +786,239 @@ vi.stubGlobal(
   }),
 );
 
+function unifiedCommandPayloads(): UnifiedCommand[] {
+  return vi
+    .mocked(fetch)
+    .mock
+    .calls
+    .filter(([input]) => String(input).includes("/api/unified/command"))
+    .map(([, init]) =>
+      UnifiedCommandSchema.parse(JSON.parse(String(init?.body))),
+    );
+}
+
+function createdThreadReadRequestCount(): number {
+  return vi
+    .mocked(fetch)
+    .mock
+    .calls
+    .filter(([input]) =>
+      String(input).includes("/api/unified/thread/created-thread"),
+    ).length;
+}
+
 describe("App", () => {
   it("renders core sections", async () => {
     render(<App />);
     expect((await screen.findAllByText("AgentBridge")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
+  });
+
+  it("opens a projectless draft from the empty sidebar action", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New Codex thread" }),
+    );
+
+    expect(await screen.findByText("No messages yet")).toBeTruthy();
+    expect((await screen.findAllByText("New thread")).length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(
+        unifiedCommandPayloads().some((payload) => payload.kind === "createThread"),
+      ).toBe(false);
+    });
+  });
+
+  it("opens a projectless draft from the conversation section action", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-projectless",
+          provider: "codex",
+          preview: "projectless thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/Users/test/Documents/Codex/2026-06-21-new-chat",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText("对话")).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New Codex conversation" }),
+    );
+
+    expect(await screen.findByText("No messages yet")).toBeTruthy();
+    expect((await screen.findAllByText("New thread")).length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(
+        unifiedCommandPayloads().some((payload) => payload.kind === "createThread"),
+      ).toBe(false);
+    });
+  });
+
+  it("creates a projectless thread when sending the first draft message", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New Codex thread" }),
+    );
+
+    const textbox = await screen.findByPlaceholderText("Message Codex…");
+    fireEvent.change(textbox, {
+      target: { value: "hello from a draft" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const payloads = unifiedCommandPayloads();
+      const createCommand =
+        payloads.find((payload) => payload.kind === "createThread") ?? null;
+      const sendCommand =
+        payloads.find(
+          (payload) =>
+            payload.kind === "sendMessage" &&
+            payload.text === "hello from a draft",
+        ) ?? null;
+
+      expect(createCommand).toEqual({
+        kind: "createThread",
+        provider: "codex",
+        cwd: null,
+      });
+      expect(sendCommand).toEqual(
+        expect.objectContaining({
+          kind: "sendMessage",
+          provider: "codex",
+          threadId: "created-thread",
+          text: "hello from a draft",
+        }),
+      );
+      expect(createdThreadReadRequestCount()).toBe(0);
+    });
+  });
+
+  it("opens a project draft from the project group action", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-project",
+          provider: "codex",
+          preview: "existing project thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "New Codex thread in project",
+      }),
+    );
+
+    expect(await screen.findByText("No messages yet")).toBeTruthy();
+    expect((await screen.findAllByText("New thread")).length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(
+        unifiedCommandPayloads().some((payload) => payload.kind === "createThread"),
+      ).toBe(false);
+    });
+  });
+
+  it("creates a project thread when sending the first project draft message", async () => {
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: "thread-project",
+          provider: "codex",
+          preview: "existing project thread",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "New Codex thread in project",
+      }),
+    );
+
+    const textbox = await screen.findByPlaceholderText("Message Codex…");
+    fireEvent.change(textbox, {
+      target: { value: "hello from a project draft" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const payloads = unifiedCommandPayloads();
+      const createCommand =
+        payloads.find((payload) => payload.kind === "createThread") ?? null;
+      const sendCommand =
+        payloads.find(
+          (payload) =>
+            payload.kind === "sendMessage" &&
+            payload.text === "hello from a project draft",
+        ) ?? null;
+
+      expect(createCommand).toEqual({
+        kind: "createThread",
+        provider: "codex",
+        cwd: "/tmp/project",
+      });
+      expect(sendCommand).toEqual(
+        expect.objectContaining({
+          kind: "sendMessage",
+          provider: "codex",
+          threadId: "created-thread",
+          text: "hello from a project draft",
+        }),
+      );
+      expect(createdThreadReadRequestCount()).toBe(0);
+    });
   });
 
   it("shows a provider connection state when sidebar listing is disconnected", async () => {
