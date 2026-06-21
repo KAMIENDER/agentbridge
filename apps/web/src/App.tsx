@@ -98,6 +98,7 @@ import {
   type UnifiedThreadRequestResponse,
   type UnifiedFeatureAvailability,
   type UnifiedFeatureId,
+  type UnifiedThread,
 } from "@agentbridge/unified-surface";
 import { useTheme } from "@/hooks/useTheme";
 import { ChatTimeline, type ChatTimelineEntry } from "@/components/ChatTimeline";
@@ -160,6 +161,14 @@ type ConversationTurn = NonNullable<
 >["turns"][number];
 type ConversationTurnItem = NonNullable<ConversationTurn["items"]>[number];
 type FlatConversationItem = ChatTimelineEntry;
+type PendingLocalMessage = {
+  id: string;
+  threadId: string;
+  text: string;
+  baseTurnCount: number;
+  baseLastTurnItemCount: number;
+  createdAtMs: number;
+};
 
 function formatTimingSummary(
   metric:
@@ -484,10 +493,172 @@ function buildThreadsSignature(threads: Thread[]): string[] {
 }
 
 let conversationDraftSequence = 0;
+let pendingLocalMessageSequence = 0;
 
 function createConversationDraftId(): string {
   conversationDraftSequence += 1;
   return `conversation-draft-${String(conversationDraftSequence)}`;
+}
+
+function createPendingLocalMessageId(): string {
+  pendingLocalMessageSequence += 1;
+  return `pending-local-message-${String(pendingLocalMessageSequence)}`;
+}
+
+function buildPendingLocalMessage(input: {
+  threadId: string;
+  text: string;
+  baseState: UnifiedThread | null;
+}): PendingLocalMessage {
+  const baseTurnCount = input.baseState?.turns.length ?? 0;
+  const baseLastTurn = input.baseState?.turns[baseTurnCount - 1] ?? null;
+
+  return {
+    id: createPendingLocalMessageId(),
+    threadId: input.threadId,
+    text: input.text,
+    baseTurnCount,
+    baseLastTurnItemCount: baseLastTurn?.items.length ?? 0,
+    createdAtMs: Date.now(),
+  };
+}
+
+function buildPendingLocalUserMessageItem(
+  message: PendingLocalMessage,
+): ConversationTurnItem {
+  return {
+    id: `pending-user-message:${message.id}`,
+    type: "userMessage",
+    content: [
+      {
+        type: "text",
+        text: message.text,
+      },
+    ],
+  };
+}
+
+function buildPendingLocalUserTurn(
+  message: PendingLocalMessage,
+): ConversationTurn {
+  return {
+    id: `pending-user-turn:${message.id}`,
+    status: "completed",
+    items: [buildPendingLocalUserMessageItem(message)],
+  };
+}
+
+function userMessageItemHasText(
+  item: ConversationTurnItem,
+  text: string,
+): boolean {
+  switch (item.type) {
+    case "userMessage":
+    case "steeringUserMessage":
+      return item.content.some((part) => {
+        switch (part.type) {
+          case "text":
+            return part.text.trim() === text.trim();
+          case "image":
+          case "localImage":
+          case "skill":
+          case "mention":
+            return false;
+        }
+      });
+    case "agentMessage":
+    case "error":
+    case "reasoning":
+    case "agentReasoningSectionBreak":
+    case "plan":
+    case "todoList":
+    case "planImplementation":
+    case "userInputResponse":
+    case "commandExecution":
+    case "fileChange":
+    case "contextCompaction":
+    case "webSearch":
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "collabAgentToolCall":
+    case "imageView":
+    case "imageGeneration":
+    case "enteredReviewMode":
+    case "exitedReviewMode":
+    case "remoteTaskCreated":
+    case "modelChanged":
+    case "forkedFromConversation":
+    case "steered":
+      return false;
+  }
+}
+
+function threadContainsPendingLocalMessage(
+  thread: UnifiedThread,
+  message: PendingLocalMessage,
+): boolean {
+  if (thread.id !== message.threadId) {
+    return false;
+  }
+
+  for (let turnIndex = 0; turnIndex < thread.turns.length; turnIndex += 1) {
+    const turn = thread.turns[turnIndex];
+    if (!turn) {
+      continue;
+    }
+    if (turnIndex < message.baseTurnCount - 1) {
+      continue;
+    }
+    for (let itemIndex = 0; itemIndex < turn.items.length; itemIndex += 1) {
+      if (
+        turnIndex === message.baseTurnCount - 1 &&
+        itemIndex < message.baseLastTurnItemCount
+      ) {
+        continue;
+      }
+      const item = turn.items[itemIndex];
+      if (item && userMessageItemHasText(item, message.text)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function mergePendingLocalMessagesIntoThread(
+  thread: UnifiedThread,
+  messages: PendingLocalMessage[],
+): UnifiedThread {
+  const missingMessages = messages.filter(
+    (message) =>
+      message.threadId === thread.id &&
+      !threadContainsPendingLocalMessage(thread, message),
+  );
+  if (missingMessages.length === 0) {
+    return thread;
+  }
+
+  const lastTurn = thread.turns[thread.turns.length - 1] ?? null;
+  if (lastTurn && isTurnInProgressStatus(lastTurn.status)) {
+    const pendingItems = missingMessages.map(buildPendingLocalUserMessageItem);
+    const nextLastTurn: ConversationTurn = {
+      ...lastTurn,
+      items: [...pendingItems, ...lastTurn.items],
+    };
+    return {
+      ...thread,
+      turns: [...thread.turns.slice(0, -1), nextLastTurn],
+    };
+  }
+
+  return {
+    ...thread,
+    turns: [
+      ...thread.turns,
+      ...missingMessages.map(buildPendingLocalUserTurn),
+    ],
+  };
 }
 
 function buildOptimisticThreadSummary(
@@ -1515,6 +1686,9 @@ export function App(): React.JSX.Element {
     useState<ReadThreadResponse | null>(
       initialSnapshot?.readThreadState ?? null,
     );
+  const [pendingLocalMessages, setPendingLocalMessages] = useState<
+    PendingLocalMessage[]
+  >([]);
   const [streamEvents, setStreamEvents] = useState<
     StreamEventsResponse["events"]
   >(initialSnapshot?.streamEvents ?? []);
@@ -1623,6 +1797,7 @@ export function App(): React.JSX.Element {
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
   const optimisticSelectedThreadIdsRef = useRef<Set<string>>(new Set());
   const freshlyCreatedThreadIdsRef = useRef<Set<string>>(new Set());
+  const pendingLocalMessagesRef = useRef<PendingLocalMessage[]>([]);
   const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const selectedThreadLoadRequestIdRef = useRef(0);
   const loadSelectedThreadRef = useRef<
@@ -1661,6 +1836,34 @@ export function App(): React.JSX.Element {
     [threads, selectedThreadId],
   );
   const activeConversationDraft = selectedThreadId ? null : conversationDraft;
+  const setPendingLocalMessagesState = useCallback(
+    (nextMessages: PendingLocalMessage[]) => {
+      pendingLocalMessagesRef.current = nextMessages;
+      setPendingLocalMessages(nextMessages);
+    },
+    [],
+  );
+  const addPendingLocalMessage = useCallback(
+    (message: PendingLocalMessage) => {
+      setPendingLocalMessagesState([
+        ...pendingLocalMessagesRef.current,
+        message,
+      ]);
+    },
+    [setPendingLocalMessagesState],
+  );
+  const removePendingLocalMessage = useCallback(
+    (messageId: string) => {
+      const nextMessages = pendingLocalMessagesRef.current.filter(
+        (message) => message.id !== messageId,
+      );
+      if (nextMessages.length === pendingLocalMessagesRef.current.length) {
+        return;
+      }
+      setPendingLocalMessagesState(nextMessages);
+    },
+    [setPendingLocalMessagesState],
+  );
   const agentsById = useMemo(() => {
     const map: Partial<Record<AgentId, AgentDescriptor>> = {};
     for (const descriptor of agentDescriptors) {
@@ -1898,13 +2101,46 @@ export function App(): React.JSX.Element {
     [readThreadState, selectedThreadId],
   );
   const activeOwnerClientId = activeLiveState?.ownerClientId ?? null;
-  const conversationState = useMemo(
+  const remoteConversationState = useMemo(
     () =>
       activeLiveState?.conversationState ??
       activeReadThreadState?.thread ??
       null,
     [activeLiveState?.conversationState, activeReadThreadState?.thread],
   );
+  const activePendingLocalMessages = useMemo(
+    () =>
+      selectedThreadId
+        ? pendingLocalMessages.filter(
+            (message) => message.threadId === selectedThreadId,
+          )
+        : [],
+    [pendingLocalMessages, selectedThreadId],
+  );
+  const conversationState = useMemo(
+    () =>
+      remoteConversationState
+        ? mergePendingLocalMessagesIntoThread(
+            remoteConversationState,
+            activePendingLocalMessages,
+          )
+        : null,
+    [activePendingLocalMessages, remoteConversationState],
+  );
+  useEffect(() => {
+    if (!remoteConversationState) {
+      return;
+    }
+    const nextMessages = pendingLocalMessagesRef.current.filter(
+      (message) =>
+        message.threadId !== remoteConversationState.id ||
+        !threadContainsPendingLocalMessage(remoteConversationState, message),
+    );
+    if (nextMessages.length === pendingLocalMessagesRef.current.length) {
+      return;
+    }
+    setPendingLocalMessagesState(nextMessages);
+  }, [remoteConversationState, setPendingLocalMessagesState]);
   const requestSourceState = conversationState;
 
   const pendingRequests = useMemo(() => {
@@ -3045,6 +3281,7 @@ export function App(): React.JSX.Element {
     setThreadListErrors({ codex: null, opencode: null });
     setLiveState(null);
     setReadThreadState(null);
+    setPendingLocalMessagesState([]);
     setStreamEvents([]);
     setSelectedRequestId(null);
     setAnswerDraft({});
@@ -3056,7 +3293,7 @@ export function App(): React.JSX.Element {
     providerCatalogCacheRef.current.clear();
     realtimeSocketRef.current?.disconnect();
     realtimeSocketRef.current = null;
-  }, []);
+  }, [setPendingLocalMessagesState]);
 
   const switchServerTarget = useCallback(
     async (baseUrl: string, options?: { saved: boolean }) => {
@@ -3965,6 +4202,7 @@ export function App(): React.JSX.Element {
         return;
       }
 
+      let pendingLocalMessage: PendingLocalMessage | null = null;
       setIsBusy(true);
       try {
         setError("");
@@ -4038,6 +4276,15 @@ export function App(): React.JSX.Element {
         if (selectedMode && effectiveModelId.length === 0) {
           throw new Error("No model is available for the selected mode");
         }
+        pendingLocalMessage = buildPendingLocalMessage({
+          threadId,
+          text: draft,
+          baseState:
+            remoteConversationState?.id === threadId
+              ? remoteConversationState
+              : threadConversationStateForSend,
+        });
+        addPendingLocalMessage(pendingLocalMessage);
         await sendMessage({
           provider: threadAgentId,
           threadId,
@@ -4075,6 +4322,9 @@ export function App(): React.JSX.Element {
           void refreshAll();
         }
       } catch (e) {
+        if (pendingLocalMessage) {
+          removePendingLocalMessage(pendingLocalMessage.id);
+        }
         setError(toErrorMessage(e));
       } finally {
         setIsBusy(false);
@@ -4084,6 +4334,7 @@ export function App(): React.JSX.Element {
       activeThreadAgentId,
       activeOwnerClientId,
       activeConversationDraft,
+      addPendingLocalMessage,
       canSendMessageForActiveAgent,
       canSendToActiveThreadOwner,
       conversationState,
@@ -4093,7 +4344,9 @@ export function App(): React.JSX.Element {
       loadCoreData,
       models,
       modes,
+      remoteConversationState,
       refreshAll,
+      removePendingLocalMessage,
       selectedAgentId,
       selectedModeKey,
       selectedModelId,

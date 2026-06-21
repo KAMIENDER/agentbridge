@@ -1228,16 +1228,19 @@ function classifyCodexFrameForRealtime(frame: IpcFrame): void {
         frame.method as AppServerServerRequestMethod,
       );
       if (mapping.status === "exposed") {
+        const threadId = extractThreadIdFromIpcFrame(frame);
         if (shouldQueueCoreDeltaForCodexRequest()) {
           queueCoreDelta?.();
         }
-        if (mapping.eventKind === "error") {
+        if (
+          mapping.eventKind === "error" &&
+          shouldBroadcastCodexError(frame.method, threadId)
+        ) {
           broadcastSyncError?.(
             `Codex request event reported error for method ${frame.method}`,
             "codexEventError",
           );
         }
-        const threadId = extractThreadIdFromIpcFrame(frame);
         if (threadId) {
           queueThreadDelta?.(threadId);
         }
@@ -1254,6 +1257,7 @@ function classifyCodexFrameForRealtime(frame: IpcFrame): void {
         frame.method as AppServerServerNotificationMethod,
       );
       if (mapping.status === "exposed") {
+        const threadId = extractThreadIdFromIpcFrame(frame);
         if (
           shouldQueueCoreDeltaForCodexNotification(
             frame.method as AppServerServerNotificationMethod,
@@ -1262,13 +1266,15 @@ function classifyCodexFrameForRealtime(frame: IpcFrame): void {
         ) {
           queueCoreDelta?.();
         }
-        if (mapping.eventKind === "error") {
+        if (
+          mapping.eventKind === "error" &&
+          shouldBroadcastCodexError(frame.method, threadId)
+        ) {
           broadcastSyncError?.(
             `Codex notification reported error for method ${frame.method}`,
             "codexEventError",
           );
         }
-        const threadId = extractThreadIdFromIpcFrame(frame);
         if (threadId) {
           queueThreadDelta?.(threadId);
         }
@@ -1316,7 +1322,10 @@ function classifyCodexAppFrameForRealtime(event: CodexAppFrameEvent): void {
   ) {
     queueCoreDelta?.();
   }
-  if (mapping.eventKind === "error") {
+  if (
+    mapping.eventKind === "error" &&
+    shouldBroadcastCodexError(event.frame.method, event.threadId)
+  ) {
     broadcastSyncError?.(
       `Codex app notification reported error for method ${event.frame.method}`,
       "codexEventError",
@@ -1325,6 +1334,13 @@ function classifyCodexAppFrameForRealtime(event: CodexAppFrameEvent): void {
   if (event.threadId) {
     queueThreadDelta?.(event.threadId);
   }
+}
+
+function shouldBroadcastCodexError(
+  method: IpcFrame["method"] | CodexAppFrameEvent["frame"]["method"],
+  threadId: string | null,
+): boolean {
+  return !(method === "error" && threadId !== null);
 }
 
 function shouldQueueCoreDeltaForCodexRequest(): boolean {

@@ -913,6 +913,127 @@ describe("App", () => {
     });
   });
 
+  it("keeps a sent message visible while live state starts generating before echoing it", async () => {
+    const threadId = "thread-local-pending-message";
+    const baseThread = buildConversationStateFixture(
+      threadId,
+      "gpt-5.3-codex",
+      {
+        turnItems: [
+          {
+            id: "agent-ready",
+            type: "agentMessage",
+            text: "Ready for the next instruction.",
+          },
+        ],
+      },
+    );
+    const generatingThread: UnifiedThreadFixture = {
+      ...baseThread,
+      turns: [
+        {
+          id: "turn-generating",
+          status: "inProgress",
+          items: [
+            {
+              id: "reasoning-generating",
+              type: "reasoning",
+              summary: ["Thinking through this"],
+            },
+          ],
+        },
+      ],
+    };
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Ready for the next instruction.",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/project",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    let liveThread = baseThread;
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: {
+        ...baseThread,
+        id: targetThreadId,
+      },
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: "client-1",
+      conversationState: {
+        ...liveThread,
+        id: targetThreadId,
+      },
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(
+      (await screen.findAllByText("Ready for the next instruction.")).length,
+    ).toBeGreaterThan(0);
+
+    const messageText = "Show this immediately while you think";
+    fireEvent.change(await screen.findByRole("textbox"), {
+      target: { value: messageText },
+    });
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    await waitFor(() => expect(sendButton.getAttribute("disabled")).toBeNull());
+    fireEvent.click(sendButton);
+    liveThread = generatingThread;
+
+    await waitFor(() => {
+      expect(
+        unifiedCommandPayloads().some(
+          (payload) =>
+            payload.kind === "sendMessage" &&
+            payload.threadId === threadId &&
+            payload.text === messageText,
+        ),
+      ).toBe(true);
+    });
+
+    MockRealtimeSocket.emitServerMessage({
+      kind: "threadDelta",
+      syncVersion: 2,
+      thread: {
+        threadId,
+        readThread: null,
+        liveState: {
+          ownerClientId: "client-1",
+          conversationState: generatingThread,
+          liveStateError: null,
+        },
+        streamEvents: [],
+      },
+    });
+
+    expect(await screen.findByText(messageText)).toBeTruthy();
+    expect(await screen.findByText("Thinking through this")).toBeTruthy();
+  });
+
   it("opens a project draft from the project group action", async () => {
     threadsFixture = {
       ok: true,
