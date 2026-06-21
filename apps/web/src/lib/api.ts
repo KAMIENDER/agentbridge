@@ -12,6 +12,7 @@ import {
   UnifiedThreadSchema,
   UnifiedThreadSummarySchema,
   UnifiedThreadRequestResponseSchema,
+  UnifiedTurnSchema,
   UnifiedUserInputRequestIdSchema,
   type JsonValue,
   type UnifiedApprovalThreadRequest,
@@ -22,6 +23,7 @@ import {
   type UnifiedApprovalPolicy,
   type UnifiedProviderId,
   type UnifiedThread,
+  type UnifiedTurn,
   type UnifiedThreadRequestResponse,
   type UnifiedUserInputRequest,
 } from "@agentbridge/unified-surface";
@@ -48,6 +50,8 @@ const ApiEnvelopeSchema = z
   .passthrough();
 
 const LocalImagePathSchema = z.string().min(1).max(4096);
+const ThreadPayloadModeSchema = z.enum(["full", "compact"]);
+type ThreadPayloadMode = z.infer<typeof ThreadPayloadModeSchema>;
 
 const ApiFailureEnvelopeSchema = z
   .object({
@@ -201,6 +205,34 @@ const UnifiedReadThreadEnvelopeSchema = z
     thread: UnifiedThreadSchema,
   })
   .strict();
+
+const UnifiedReadThreadIncrementalEnvelopeSchema = z.discriminatedUnion(
+  "change",
+  [
+    z
+      .object({
+        ok: z.literal(true),
+        change: z.literal("unchanged"),
+        thread: UnifiedThreadSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ok: z.literal(true),
+        change: z.literal("patch"),
+        thread: UnifiedThreadSchema,
+        appendTurns: z.array(UnifiedTurnSchema),
+      })
+      .strict(),
+    z
+      .object({
+        ok: z.literal(true),
+        change: z.literal("resync"),
+        thread: UnifiedThreadSchema,
+      })
+      .strict(),
+  ],
+);
 
 const UnifiedFeaturesEnvelopeSchema = z
   .object({
@@ -389,6 +421,18 @@ const ReadThreadResponseSchema = z
     thread: UnifiedThreadSchema,
   })
   .strict();
+export type ReadThreadResponse = z.infer<typeof ReadThreadResponseSchema>;
+export type ReadThreadIncrementalResponse = z.infer<
+  typeof UnifiedReadThreadIncrementalEnvelopeSchema
+>;
+
+interface ReadThreadIncrementalOptions {
+  provider?: AgentId;
+  payload?: ThreadPayloadMode;
+  baseUpdatedAt: number;
+  baseTurnCount: number;
+  baseLastTurnId?: UnifiedTurn["id"];
+}
 
 const ArchiveThreadResponseSchema = z
   .object({
@@ -465,6 +509,14 @@ export function getSavedServerBaseUrl(): string | null {
 
 export function getDefaultServerBaseUrl(): string {
   return getDefaultStoredServerBaseUrl();
+}
+
+export function getDefaultThreadPayloadMode(): ThreadPayloadMode {
+  const baseUrl = parseServerBaseUrl(resolveServerBaseUrl());
+  const hostname = new URL(baseUrl).hostname;
+  return ThreadPayloadModeSchema.parse(
+    hostname.endsWith(".ts.net") ? "compact" : "full",
+  );
 }
 
 export function setServerBaseUrl(value: string): string {
@@ -866,8 +918,12 @@ export async function listSidebarThreads(options: {
 
 export async function readThread(
   threadId: string,
-  options?: { includeTurns?: boolean; provider?: AgentId },
-): Promise<z.infer<typeof ReadThreadResponseSchema>> {
+  options?: {
+    includeTurns?: boolean;
+    provider?: AgentId;
+    payload?: ThreadPayloadMode;
+  },
+): Promise<ReadThreadResponse> {
   const params = new URLSearchParams();
   if (typeof options?.provider === "string") {
     params.set("provider", options.provider);
@@ -875,6 +931,7 @@ export async function readThread(
   if (typeof options?.includeTurns === "boolean") {
     params.set("includeTurns", options.includeTurns ? "1" : "0");
   }
+  params.set("payload", options?.payload ?? getDefaultThreadPayloadMode());
 
   const query = params.toString();
   const payload = await requestEnvelope(
@@ -885,6 +942,31 @@ export async function readThread(
   return ReadThreadResponseSchema.parse({
     thread: payload.thread,
   });
+}
+
+export async function readThreadIncremental(
+  threadId: string,
+  options: ReadThreadIncrementalOptions,
+): Promise<ReadThreadIncrementalResponse> {
+  const params = new URLSearchParams();
+  params.set("incremental", "1");
+  params.set("includeTurns", "1");
+  params.set("payload", options.payload ?? getDefaultThreadPayloadMode());
+  params.set("baseUpdatedAt", String(options.baseUpdatedAt));
+  params.set("baseTurnCount", String(options.baseTurnCount));
+  if (options.baseLastTurnId) {
+    params.set("baseLastTurnId", options.baseLastTurnId);
+  }
+  if (options.provider) {
+    params.set("provider", options.provider);
+  }
+
+  const payload = await requestEnvelope(
+    `/api/unified/thread/${encodeURIComponent(threadId)}?${params.toString()}`,
+    UnifiedReadThreadIncrementalEnvelopeSchema,
+  );
+
+  return UnifiedReadThreadIncrementalEnvelopeSchema.parse(payload);
 }
 
 export async function setThreadArchived(input: {

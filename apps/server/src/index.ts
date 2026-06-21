@@ -40,6 +40,15 @@ import {
   type LocalImageFile,
   type LocalImageReadIssueCode,
 } from "./local-image.js";
+import {
+  UnifiedThreadPayloadModeSchema,
+  type UnifiedThreadPayloadMode,
+  compactUnifiedThreadForPayload,
+} from "./thread-payload.js";
+import {
+  ThreadIncrementalReadQuerySchema,
+  buildIncrementalThreadRead,
+} from "./thread-incremental.js";
 import { logger } from "./logger.js";
 import {
   parseServerCliOptions,
@@ -683,8 +692,17 @@ interface RateLimitsCacheEntry {
   value: AppServerGetAccountRateLimitsResponse;
 }
 
+interface ThreadSnapshotCacheEntry {
+  updatedAt: number;
+  value: UnifiedThread;
+}
+
 const sidebarCacheByKey = new Map<string, SidebarCacheEntry>();
 const sidebarInFlightByKey = new Map<string, Promise<UnifiedSidebarResponse>>();
+const threadSnapshotCacheByKey = new Map<string, ThreadSnapshotCacheEntry>();
+const THREAD_SNAPSHOT_CACHE_MAX_ENTRIES = 120;
+const ThreadUpdatedAtSchema = z.number().int().nonnegative();
+const ThreadIncrementalFlagSchema = z.union([z.literal("1"), z.null()]);
 
 function invalidateSidebarCache(): void {
   sidebarCacheByKey.clear();
@@ -693,6 +711,124 @@ function invalidateSidebarCache(): void {
 let rateLimitsCacheEntry: RateLimitsCacheEntry | null = null;
 let rateLimitsInFlight: Promise<AppServerGetAccountRateLimitsResponse> | null =
   null;
+
+function buildThreadSnapshotCacheKey(input: {
+  provider: UnifiedProviderId;
+  threadId: string;
+  payloadMode: UnifiedThreadPayloadMode;
+}): string {
+  return [input.provider, input.payloadMode, input.threadId].join(":");
+}
+
+function readThreadUpdatedAt(thread: UnifiedThread): number | null {
+  const result = ThreadUpdatedAtSchema.safeParse(thread.updatedAt);
+  return result.success ? result.data : null;
+}
+
+function readThreadSnapshotCache(input: {
+  provider: UnifiedProviderId;
+  threadId: string;
+  payloadMode: UnifiedThreadPayloadMode;
+  updatedAt: number;
+}): UnifiedThread | null {
+  const cached = threadSnapshotCacheByKey.get(buildThreadSnapshotCacheKey(input));
+  if (!cached || cached.updatedAt !== input.updatedAt) {
+    return null;
+  }
+  return cached.value;
+}
+
+function writeThreadSnapshotCache(input: {
+  provider: UnifiedProviderId;
+  payloadMode: UnifiedThreadPayloadMode;
+  thread: UnifiedThread;
+}): void {
+  if (input.payloadMode !== "compact") {
+    return;
+  }
+  const updatedAt = readThreadUpdatedAt(input.thread);
+  if (updatedAt === null) {
+    return;
+  }
+  const key = buildThreadSnapshotCacheKey({
+    provider: input.provider,
+    threadId: input.thread.id,
+    payloadMode: input.payloadMode,
+  });
+  threadSnapshotCacheByKey.set(key, {
+    updatedAt,
+    value: input.thread,
+  });
+  while (threadSnapshotCacheByKey.size > THREAD_SNAPSHOT_CACHE_MAX_ENTRIES) {
+    for (const oldestKey of threadSnapshotCacheByKey.keys()) {
+      threadSnapshotCacheByKey.delete(oldestKey);
+      break;
+    }
+  }
+}
+
+async function readUnifiedThreadPayload(input: {
+  provider: UnifiedProviderId;
+  threadId: string;
+  includeTurns: boolean;
+  payloadMode: UnifiedThreadPayloadMode;
+  discoveredThread: UnifiedThread | null;
+  discoveredThreadIncludesTurns: boolean;
+}): Promise<UnifiedThread> {
+  if (!input.includeTurns) {
+    const thread =
+      input.discoveredThread && !input.discoveredThreadIncludesTurns
+        ? input.discoveredThread
+        : await readUnifiedThreadDirect({
+            provider: input.provider,
+            threadId: input.threadId,
+            includeTurns: false,
+          });
+    return compactUnifiedThreadForPayload(thread, input.payloadMode);
+  }
+
+  if (input.payloadMode === "compact") {
+    const metadataThread =
+      input.discoveredThread && !input.discoveredThreadIncludesTurns
+        ? input.discoveredThread
+        : await readUnifiedThreadDirect({
+            provider: input.provider,
+            threadId: input.threadId,
+            includeTurns: false,
+          });
+    const metadataUpdatedAt = readThreadUpdatedAt(metadataThread);
+    if (metadataUpdatedAt !== null) {
+      const cached = readThreadSnapshotCache({
+        provider: input.provider,
+        threadId: input.threadId,
+        payloadMode: input.payloadMode,
+        updatedAt: metadataUpdatedAt,
+      });
+      if (cached) {
+        return cached;
+      }
+    }
+  }
+
+  const thread =
+    input.discoveredThread && input.discoveredThreadIncludesTurns
+      ? input.discoveredThread
+      : await readUnifiedThreadDirect({
+          provider: input.provider,
+          threadId: input.threadId,
+          includeTurns: true,
+        });
+  const payloadThread = compactUnifiedThreadForPayload(
+    thread,
+    input.payloadMode,
+  );
+  writeThreadSnapshotCache({
+    provider: input.provider,
+    payloadMode: input.payloadMode,
+    thread: payloadThread,
+  });
+  return payloadThread;
+}
 
 function providerLabel(provider: UnifiedProviderId): string {
   return provider === "codex" ? "Codex" : "OpenCode";
@@ -1815,14 +1951,79 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
-      const includeTurns = parseBoolean(
+      const requestedIncludeTurns = parseBoolean(
         url.searchParams.get("includeTurns"),
         true,
       );
+      const payloadModeResult = UnifiedThreadPayloadModeSchema.safeParse(
+        url.searchParams.get("payload") ?? "full",
+      );
+      if (!payloadModeResult.success) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidThreadPayloadMode",
+            message: "Thread payload must be full or compact",
+            details: {
+              payload: url.searchParams.get("payload") ?? "",
+            },
+          },
+        });
+        return;
+      }
+      const payloadMode = payloadModeResult.data;
+      const incrementalFlagResult = ThreadIncrementalFlagSchema.safeParse(
+        url.searchParams.get("incremental"),
+      );
+      if (!incrementalFlagResult.success) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidThreadIncrementalFlag",
+            message: "Thread incremental flag must be 1 when present",
+            details: {
+              incremental: url.searchParams.get("incremental") ?? "",
+            },
+          },
+        });
+        return;
+      }
+      const incrementalRequested = incrementalFlagResult.data === "1";
+      const includeTurns = incrementalRequested ? true : requestedIncludeTurns;
+      const incrementalQueryResult = incrementalRequested
+        ? ThreadIncrementalReadQuerySchema.safeParse({
+            baseUpdatedAt: url.searchParams.get("baseUpdatedAt") ?? "",
+            baseTurnCount: url.searchParams.get("baseTurnCount") ?? "",
+            ...(url.searchParams.get("baseLastTurnId") !== null
+              ? {
+                  baseLastTurnId: url.searchParams.get("baseLastTurnId") ?? "",
+                }
+              : {}),
+          })
+        : null;
+      if (incrementalQueryResult && !incrementalQueryResult.success) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: {
+            code: "invalidThreadIncrementalQuery",
+            message:
+              "Thread incremental query requires baseUpdatedAt, baseTurnCount, and baseLastTurnId for non-empty bases",
+            details: {
+              threadId,
+            },
+          },
+        });
+        return;
+      }
+      const incrementalQuery =
+        incrementalQueryResult && incrementalQueryResult.success
+          ? incrementalQueryResult.data
+          : null;
       const knownProviders = threadIndex.providers(threadId);
       const resolvedProvider = threadIndex.resolve(threadId);
       let provider = providerFromQuery ?? resolvedProvider;
       let discoveredThread: UnifiedThread | null = null;
+      const discoveryIncludeTurns = incrementalRequested ? false : includeTurns;
 
       if (!provider) {
         if (knownProviders.length > 1) {
@@ -1842,7 +2043,7 @@ const server = http.createServer(async (req, res) => {
 
         const discoveredMatches = await discoverUnifiedThreads({
           threadId,
-          includeTurns,
+          includeTurns: discoveryIncludeTurns,
         });
         if (discoveredMatches.length > 1) {
           jsonResponse(res, 409, {
@@ -1919,20 +2120,33 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
-        const thread =
-          discoveredThread && discoveredThread.provider === provider
-            ? discoveredThread
-            : await readUnifiedThreadDirect({
-                provider,
-                threadId,
-                includeTurns,
-              });
+        const thread = await readUnifiedThreadPayload({
+          provider,
+          threadId,
+          includeTurns,
+          payloadMode,
+          discoveredThread:
+            discoveredThread && discoveredThread.provider === provider
+              ? discoveredThread
+              : null,
+          discoveredThreadIncludesTurns: discoveryIncludeTurns,
+        });
 
         threadIndex.register(thread.id, thread.provider);
-        jsonResponse(res, 200, {
-          ok: true,
-          thread,
-        });
+        if (incrementalQuery) {
+          jsonResponse(res, 200, {
+            ok: true,
+            ...buildIncrementalThreadRead({
+              base: incrementalQuery,
+              currentThread: thread,
+            }),
+          });
+        } else {
+          jsonResponse(res, 200, {
+            ok: true,
+            thread,
+          });
+        }
       } catch (error) {
         const message = toErrorMessage(error);
         jsonResponse(res, 500, {

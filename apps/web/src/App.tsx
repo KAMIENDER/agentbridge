@@ -39,6 +39,7 @@ import {
   clearServerBaseUrl,
   createThread,
   getDefaultServerBaseUrl,
+  getDefaultThreadPayloadMode,
   getAccountRateLimits,
   getHealth,
   getHistoryEntry,
@@ -52,6 +53,7 @@ import {
   getStreamEvents,
   getUnifiedWebSocketUrl,
   readThread,
+  readThreadIncremental,
   getTraceStatus,
   interruptThread,
   listAgents,
@@ -70,6 +72,10 @@ import {
   setServerAccessKey,
   type AgentId,
 } from "@/lib/api";
+import {
+  readCachedThreadSnapshot,
+  writeCachedThread,
+} from "@/lib/thread-cache";
 import {
   createUnifiedRealtimeSocket,
   type UnifiedRealtimeSocket,
@@ -143,6 +149,9 @@ type ModelsResponse = Awaited<ReturnType<typeof listModels>>;
 type LiveStateResponse = Awaited<ReturnType<typeof getLiveState>>;
 type StreamEventsResponse = Awaited<ReturnType<typeof getStreamEvents>>;
 type ReadThreadResponse = Awaited<ReturnType<typeof readThread>>;
+type ReadThreadIncrementalResponse = Awaited<
+  ReturnType<typeof readThreadIncremental>
+>;
 type AgentsResponse = Awaited<ReturnType<typeof listAgents>>;
 type TraceStatus = Awaited<ReturnType<typeof getTraceStatus>>;
 type HistoryResponse = Awaited<ReturnType<typeof listDebugHistory>>;
@@ -224,6 +233,7 @@ const StreamTokenUsageUpdatedEventSchema = z
       .passthrough(),
   })
   .passthrough();
+const ThreadUpdatedAtSchema = z.number();
 
 interface NormalizedTokenUsage {
   contextTokens: number;
@@ -295,6 +305,60 @@ function collectThreadProviderCandidates(input: {
   pushCandidate(input.liveState?.conversationState?.provider ?? null);
 
   return candidates;
+}
+
+function parseThreadUpdatedAt(value: number | null | undefined): number | null {
+  const parsed = ThreadUpdatedAtSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function buildThreadIncrementalBase(
+  read: ReadThreadResponse,
+): {
+  baseUpdatedAt: number;
+  baseTurnCount: number;
+  baseLastTurnId?: ConversationTurn["id"];
+} | null {
+  const baseUpdatedAt = parseThreadUpdatedAt(read.thread.updatedAt ?? null);
+  if (baseUpdatedAt === null) {
+    return null;
+  }
+  const baseTurnCount = read.thread.turns.length;
+  const baseLastTurn = read.thread.turns[baseTurnCount - 1] ?? null;
+  return {
+    baseUpdatedAt,
+    baseTurnCount,
+    ...(baseLastTurn ? { baseLastTurnId: baseLastTurn.id } : {}),
+  };
+}
+
+function mergeIncrementalThreadRead(input: {
+  baseRead: ReadThreadResponse;
+  incremental: ReadThreadIncrementalResponse;
+}): ReadThreadResponse {
+  switch (input.incremental.change) {
+    case "unchanged":
+      return {
+        thread: {
+          ...input.incremental.thread,
+          turns: input.baseRead.thread.turns,
+        },
+      };
+    case "patch":
+      return {
+        thread: {
+          ...input.incremental.thread,
+          turns: [
+            ...input.baseRead.thread.turns,
+            ...input.incremental.appendTurns,
+          ],
+        },
+      };
+    case "resync":
+      return {
+        thread: input.incremental.thread,
+      };
+  }
 }
 
 interface AppViewSnapshot {
@@ -2980,6 +3044,13 @@ export function App(): React.JSX.Element {
       try {
       const cachedThreadState =
         threadViewStateCacheRef.current.get(threadId) ?? null;
+      const persistentThreadCacheEnabled =
+        includeTurns && getDefaultThreadPayloadMode() === "compact";
+      const selectedThreadUpdatedAt =
+        selectedThreadIdRef.current === threadId
+          ? parseThreadUpdatedAt(selectedThread?.updatedAt ?? null)
+          : null;
+      const serverBaseUrlForThreadCache = getServerBaseUrl();
       const candidateProviders = collectThreadProviderCandidates({
         threadId,
         providerByThreadId: threadProviderByIdRef.current,
@@ -2999,21 +3070,117 @@ export function App(): React.JSX.Element {
 
       let threadAgentId: AgentId | null = null;
       let read: ReadThreadResponse | null = null;
+      let shouldWritePersistentThreadCache = false;
+      let threadUpdatedAtForCache = selectedThreadUpdatedAt;
+      const cachedThreadSnapshot = persistentThreadCacheEnabled
+        ? await readCachedThreadSnapshot({
+            serverBaseUrl: serverBaseUrlForThreadCache,
+            threadId,
+          })
+        : null;
 
-      for (const candidateProvider of candidateProviders) {
-        try {
-          read = await readThread(threadId, {
-            includeTurns,
-            provider: candidateProvider,
+      if (persistentThreadCacheEnabled && threadUpdatedAtForCache === null) {
+        let metadataRead: ReadThreadResponse | null = null;
+        for (const candidateProvider of candidateProviders) {
+          try {
+            metadataRead = await readThread(threadId, {
+              includeTurns: false,
+              provider: candidateProvider,
+            });
+            break;
+          } catch (error) {
+            if (
+              !(error instanceof ApiRequestError) ||
+              error.code !== "threadNotFound"
+            ) {
+              throw error;
+            }
+          }
+        }
+        if (!metadataRead) {
+          metadataRead = await readThread(threadId, {
+            includeTurns: false,
+          });
+        }
+        threadUpdatedAtForCache = parseThreadUpdatedAt(
+          metadataRead.thread.updatedAt ?? null,
+        );
+      }
+
+      if (
+        persistentThreadCacheEnabled &&
+        cachedThreadSnapshot &&
+        threadUpdatedAtForCache !== null &&
+        cachedThreadSnapshot.updatedAt === threadUpdatedAtForCache
+      ) {
+        read = cachedThreadSnapshot.response;
+        threadAgentId = cachedThreadSnapshot.response.thread.provider;
+      }
+
+      if (persistentThreadCacheEnabled && !read && cachedThreadSnapshot) {
+        const incrementalBase = buildThreadIncrementalBase(
+          cachedThreadSnapshot.response,
+        );
+        if (incrementalBase) {
+          const incrementalProviders: AgentId[] = [];
+          for (const candidateProvider of [
+            cachedThreadSnapshot.response.thread.provider,
+            ...candidateProviders,
+          ]) {
+            if (!incrementalProviders.includes(candidateProvider)) {
+              incrementalProviders.push(candidateProvider);
+            }
+          }
+
+          let incrementalRead: ReadThreadIncrementalResponse | null = null;
+          for (const candidateProvider of incrementalProviders) {
+            try {
+              incrementalRead = await readThreadIncremental(threadId, {
+                ...incrementalBase,
+                provider: candidateProvider,
+              });
+              break;
+            } catch (error) {
+              if (
+                !(error instanceof ApiRequestError) ||
+                error.code !== "threadNotFound"
+              ) {
+                throw error;
+              }
+            }
+          }
+          if (!incrementalRead) {
+            incrementalRead = await readThreadIncremental(threadId, {
+              ...incrementalBase,
+            });
+          }
+          read = mergeIncrementalThreadRead({
+            baseRead: cachedThreadSnapshot.response,
+            incremental: incrementalRead,
           });
           threadAgentId = read.thread.provider;
-          break;
-        } catch (error) {
-          if (
-            !(error instanceof ApiRequestError) ||
-            error.code !== "threadNotFound"
-          ) {
-            throw error;
+          shouldWritePersistentThreadCache =
+            incrementalRead.change !== "unchanged";
+        }
+      }
+
+      if (!read) {
+        for (const candidateProvider of candidateProviders) {
+          try {
+            read = await readThread(threadId, {
+              includeTurns,
+              provider: candidateProvider,
+            });
+            threadAgentId = read.thread.provider;
+            shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
+            break;
+          } catch (error) {
+            if (
+              !(error instanceof ApiRequestError) ||
+              error.code !== "threadNotFound"
+            ) {
+              throw error;
+            }
           }
         }
       }
@@ -3023,6 +3190,7 @@ export function App(): React.JSX.Element {
           includeTurns,
         });
         threadAgentId = read.thread.provider;
+        shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
       }
 
       if (!threadAgentId) {
@@ -3048,6 +3216,7 @@ export function App(): React.JSX.Element {
           includeTurns: true,
           provider: threadAgentId,
         });
+        shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
       }
 
       const live = canReadLiveState
@@ -3066,6 +3235,17 @@ export function App(): React.JSX.Element {
           provider: threadAgentId,
         });
         shouldReadTurns = true;
+        shouldWritePersistentThreadCache = persistentThreadCacheEnabled;
+      }
+      if (
+        shouldReadTurns &&
+        persistentThreadCacheEnabled &&
+        shouldWritePersistentThreadCache
+      ) {
+        await writeCachedThread({
+          serverBaseUrl: serverBaseUrlForThreadCache,
+          response: read,
+        });
       }
       const shouldLoadStreamEvents =
         canReadStreamEvents &&
@@ -3205,6 +3385,7 @@ export function App(): React.JSX.Element {
       readThreadState,
       resolvedSelectedThreadProvider,
       selectedThread?.provider,
+      selectedThread?.updatedAt,
     ],
   );
 
