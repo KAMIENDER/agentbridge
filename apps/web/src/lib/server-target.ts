@@ -5,6 +5,7 @@ const LEGACY_STORAGE_KEY = "farfield.server-target.v1";
 const ACCESS_KEYS_STORAGE_KEY = "agentbridge.server-access-keys.v1";
 const LEGACY_ACCESS_KEYS_STORAGE_KEY = "farfield.server-access-keys.v1";
 const DEFAULT_SERVER_PORT = 4311;
+const LOCAL_DEFAULT_SERVER_BASE_URL = `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
 
 const ServerProtocolSchema = z.enum(["http:", "https:"]);
 
@@ -77,7 +78,32 @@ const ApiPathSchema = z
   .min(1, "API path is required")
   .regex(/^\//, "API path must start with '/'");
 
+const BrowserLocationSchema = z
+  .object({
+    hostname: z.string(),
+    origin: ServerBaseUrlSchema,
+    protocol: ServerProtocolSchema,
+  })
+  .strict();
+
 export type StoredServerTarget = z.infer<typeof StoredServerTargetSchema>;
+type BrowserLocation = z.infer<typeof BrowserLocationSchema>;
+
+function getSameOriginRemoteServerBaseUrl(input: BrowserLocation): string | null {
+  const { hostname, origin, protocol } = input;
+  if (protocol === "https:" && hostname.endsWith(".ts.net")) {
+    return parseServerBaseUrl(origin);
+  }
+  return null;
+}
+
+function getBrowserLocation(): BrowserLocation {
+  return BrowserLocationSchema.parse({
+    hostname: location.hostname,
+    origin: location.origin,
+    protocol: location.protocol,
+  });
+}
 
 function readStoredAccessKeyMap(): Record<string, string> {
   if (typeof window === "undefined") {
@@ -111,8 +137,37 @@ function writeStoredAccessKeyMap(value: Record<string, string>): void {
   );
 }
 
+export function getDefaultServerBaseUrlForLocation(
+  input: BrowserLocation,
+): string {
+  const parsedLocation = BrowserLocationSchema.parse(input);
+  return (
+    getSameOriginRemoteServerBaseUrl(parsedLocation) ??
+    LOCAL_DEFAULT_SERVER_BASE_URL
+  );
+}
+
+export function resolveServerBaseUrlForLocation(
+  stored: StoredServerTarget | null,
+  input: BrowserLocation,
+): string {
+  const parsedLocation = BrowserLocationSchema.parse(input);
+  const sameOriginRemoteBaseUrl =
+    getSameOriginRemoteServerBaseUrl(parsedLocation);
+  if (stored) {
+    if (
+      sameOriginRemoteBaseUrl !== null &&
+      stored.baseUrl === LOCAL_DEFAULT_SERVER_BASE_URL
+    ) {
+      return sameOriginRemoteBaseUrl;
+    }
+    return stored.baseUrl;
+  }
+  return getDefaultServerBaseUrlForLocation(parsedLocation);
+}
+
 export function getDefaultServerBaseUrl(): string {
-  return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
+  return getDefaultServerBaseUrlForLocation(getBrowserLocation());
 }
 
 export function readStoredServerTarget(): StoredServerTarget | null {
@@ -163,7 +218,31 @@ export function readStoredServerAccessKey(baseUrlOverride?: string): string {
     typeof baseUrlOverride === "string"
       ? parseServerBaseUrl(baseUrlOverride)
       : resolveServerBaseUrl();
-  return readStoredAccessKeyMap()[baseUrl] ?? "";
+  return resolveServerAccessKeyForLocation(
+    readStoredAccessKeyMap(),
+    baseUrl,
+    getBrowserLocation(),
+  );
+}
+
+export function resolveServerAccessKeyForLocation(
+  accessKeys: Record<string, string>,
+  baseUrl: string,
+  input: BrowserLocation,
+): string {
+  const parsedAccessKeys = StoredServerAccessKeysSchema.parse(accessKeys);
+  const parsedBaseUrl = parseServerBaseUrl(baseUrl);
+  const parsedLocation = BrowserLocationSchema.parse(input);
+  const directAccessKey = parsedAccessKeys[parsedBaseUrl];
+  if (directAccessKey) {
+    return directAccessKey;
+  }
+  const sameOriginRemoteBaseUrl =
+    getSameOriginRemoteServerBaseUrl(parsedLocation);
+  if (sameOriginRemoteBaseUrl === parsedBaseUrl) {
+    return parsedAccessKeys[LOCAL_DEFAULT_SERVER_BASE_URL] ?? "";
+  }
+  return "";
 }
 
 export function saveServerAccessKey(
@@ -190,11 +269,10 @@ export function clearStoredServerAccessKey(baseUrl: string): void {
 }
 
 export function resolveServerBaseUrl(): string {
-  const stored = readStoredServerTarget();
-  if (stored) {
-    return stored.baseUrl;
-  }
-  return getDefaultServerBaseUrl();
+  return resolveServerBaseUrlForLocation(
+    readStoredServerTarget(),
+    getBrowserLocation(),
+  );
 }
 
 export function buildServerUrl(path: string, baseUrlOverride?: string): string {
