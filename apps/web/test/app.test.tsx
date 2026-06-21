@@ -1034,6 +1034,92 @@ describe("App", () => {
     expect(await screen.findByText("Thinking through this")).toBeTruthy();
   });
 
+  it("lets selected Codex threads without a live owner submit through the server route", async () => {
+    const threadId = "thread-ownerless-server-route";
+    const baseThread = buildConversationStateFixture(
+      threadId,
+      "gpt-5.3-codex",
+      {
+        turnItems: [
+          {
+            id: "agent-ready-ownerless",
+            type: "agentMessage",
+            text: "Ready for another message.",
+          },
+        ],
+      },
+    );
+
+    window.history.replaceState(null, "", `/threads/${threadId}`);
+
+    threadsFixture = {
+      ok: true,
+      data: [
+        {
+          id: threadId,
+          provider: "codex",
+          preview: "Ready for another message.",
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          cwd: "/tmp/projectless",
+          source: "codex",
+        },
+      ],
+      cursors: {
+        codex: null,
+        opencode: null,
+      },
+      errors: {
+        codex: null,
+        opencode: null,
+      },
+    };
+
+    readThreadResolver = (targetThreadId: string) => ({
+      ok: true,
+      thread: {
+        ...baseThread,
+        id: targetThreadId,
+      },
+    });
+
+    liveStateResolver = (targetThreadId: string, _provider: ProviderId) => ({
+      kind: "readLiveState",
+      threadId: targetThreadId,
+      ownerClientId: null,
+      conversationState: null,
+      liveStateError: null,
+    });
+
+    render(<App />);
+
+    expect(
+      (await screen.findAllByText("Ready for another message.")).length,
+    ).toBeGreaterThan(0);
+
+    const messageText = "Continue this thread";
+    fireEvent.change(await screen.findByRole("textbox"), {
+      target: { value: messageText },
+    });
+
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    await waitFor(() => expect(sendButton.getAttribute("disabled")).toBeNull());
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      const sendCommand =
+        unifiedCommandPayloads().find(
+          (payload) =>
+            payload.kind === "sendMessage" &&
+            payload.threadId === threadId &&
+            payload.text === messageText,
+        ) ?? null;
+
+      expect(sendCommand).not.toBeNull();
+      expect(sendCommand).not.toHaveProperty("ownerClientId");
+    });
+  });
+
   it("opens a project draft from the project group action", async () => {
     threadsFixture = {
       ok: true,

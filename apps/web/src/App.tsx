@@ -2596,10 +2596,6 @@ export function App(): React.JSX.Element {
   const turns = conversationState?.turns ?? [];
   const lastTurn = turns[turns.length - 1];
   const isGenerating = isTurnInProgressStatus(lastTurn?.status);
-  const canSendToActiveThreadOwner =
-    !selectedThreadId ||
-    activeThreadAgentId !== "codex" ||
-    Boolean(activeOwnerClientId);
   const hasActiveThreadConversationState =
     !selectedThreadId || conversationState !== null;
   const canUseComposer = isGenerating
@@ -2608,7 +2604,6 @@ export function App(): React.JSX.Element {
       ? !isModeSyncing &&
         hasActiveThreadConversationState &&
         hasResolvedSelectedThreadProvider &&
-        canSendToActiveThreadOwner &&
         canSendMessageForActiveAgent
       : availableAgentIds.length > 0 &&
         !isModeSyncing &&
@@ -4596,10 +4591,6 @@ export function App(): React.JSX.Element {
         setError("Thread state is still loading");
         return;
       }
-      if (selectedThreadId && !canSendToActiveThreadOwner) {
-        setError("Codex thread owner is still loading");
-        return;
-      }
 
       let pendingLocalMessage: PendingLocalMessage | null = null;
       setIsBusy(true);
@@ -4735,7 +4726,6 @@ export function App(): React.JSX.Element {
       activeConversationDraft,
       addPendingLocalMessage,
       canSendMessageForActiveAgent,
-      canSendToActiveThreadOwner,
       conversationState,
       hasActiveThreadConversationState,
       hasResolvedSelectedThreadProvider,
