@@ -1,12 +1,32 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { GitBranch } from "lucide-react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import type { Components } from "react-markdown";
 import { CodeSnippet } from "./CodeSnippet";
 import { ConversationImage, imageSourceFromUrl } from "./ConversationImage";
 
 interface MarkdownTextProps {
   text: string;
+}
+
+type MarkdownComponent = typeof import("react-markdown").default;
+type RemarkGfmPlugin = typeof import("remark-gfm").default;
+type MarkdownAssets = {
+  Component: MarkdownComponent;
+  remarkGfm: RemarkGfmPlugin;
+};
+
+let markdownAssetsPromise: Promise<MarkdownAssets> | null = null;
+
+function loadMarkdownAssets(): Promise<MarkdownAssets> {
+  markdownAssetsPromise ??= Promise.all([
+    import("react-markdown"),
+    import("remark-gfm"),
+  ]).then(([markdownModule, remarkGfmModule]) => ({
+    Component: markdownModule.default,
+    remarkGfm: remarkGfmModule.default,
+  }));
+
+  return markdownAssetsPromise;
 }
 
 interface GitDirectiveSummary {
@@ -107,13 +127,43 @@ function GitDirectiveStrip({ summary }: { summary: GitDirectiveSummary }) {
 }
 
 function MarkdownTextComponent({ text }: MarkdownTextProps) {
+  const [assets, setAssets] = useState<MarkdownAssets | null>(null);
   const gitSummary = readGitDirectiveSummary(text);
   const displayText = gitSummary ? removeGitDirectives(text) : text;
+
+  useEffect(() => {
+    let isActive = true;
+    void loadMarkdownAssets().then((loadedAssets) => {
+      if (isActive) {
+        setAssets(loadedAssets);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  if (!assets) {
+    return (
+      <div className="markdown-content text-sm leading-relaxed text-foreground break-words">
+        {displayText && (
+          <p className="whitespace-pre-wrap break-words">{displayText}</p>
+        )}
+        {gitSummary && <GitDirectiveStrip summary={gitSummary} />}
+      </div>
+    );
+  }
+
+  const ReactMarkdown = assets.Component;
 
   return (
     <div className="markdown-content text-sm leading-relaxed text-foreground break-words">
       {displayText && (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        <ReactMarkdown
+          remarkPlugins={[assets.remarkGfm]}
+          components={components}
+        >
           {displayText}
         </ReactMarkdown>
       )}
