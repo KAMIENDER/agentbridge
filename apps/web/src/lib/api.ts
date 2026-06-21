@@ -848,7 +848,7 @@ export async function setThreadArchived(input: {
 
 export async function createThread(input?: {
   agentId?: AgentId;
-  cwd?: string;
+  cwd?: string | null;
   model?: string;
   modelProvider?: string;
   personality?: string;
@@ -860,7 +860,11 @@ export async function createThread(input?: {
   const result = await runUnifiedCommand({
     kind: "createThread",
     provider,
-    ...(input?.cwd ? { cwd: input.cwd } : {}),
+    ...(input?.cwd === null
+      ? { cwd: null }
+      : input?.cwd
+        ? { cwd: input.cwd }
+        : {}),
     ...(input?.model ? { model: input.model } : {}),
     ...(input?.modelProvider ? { modelProvider: input.modelProvider } : {}),
     ...(input?.personality ? { personality: input.personality } : {}),

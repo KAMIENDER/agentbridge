@@ -527,6 +527,14 @@ export const RawOtherItemSchema = z
   })
   .passthrough();
 
+export const AgentReasoningSectionBreakItemSchema = z
+  .object({
+    type: z.literal("agent_reasoning_section_break"),
+    item_id: z.string().optional(),
+    summary_index: NonNegativeIntSchema.optional()
+  })
+  .passthrough();
+
 export const AutomaticApprovalReviewItemSchema = z
   .object({
     type: z.literal("automaticApprovalReview"),
@@ -659,6 +667,22 @@ export const ImageViewItemSchema = z
   })
   .passthrough();
 
+export const ImageGenerationStatusSchema = z.enum([
+  "generating",
+  "completed",
+  "failed"
+]);
+
+export const ImageGenerationItemSchema = z
+  .object({
+    type: z.literal("imageGeneration"),
+    id: NonEmptyStringSchema,
+    status: ImageGenerationStatusSchema,
+    revisedPrompt: NullableStringSchema.optional(),
+    result: NullableStringSchema.optional()
+  })
+  .passthrough();
+
 export const EnteredReviewModeItemSchema = z
   .object({
     type: z.literal("enteredReviewMode"),
@@ -703,10 +727,12 @@ export const TurnItemSchema = z.discriminatedUnion("type", [
   GhostSnapshotItemSchema,
   RawCompactionItemSchema,
   RawOtherItemSchema,
+  AgentReasoningSectionBreakItemSchema,
   AutomaticApprovalReviewItemSchema,
   McpServerElicitationItemSchema,
   CollabAgentToolCallItemSchema,
   ImageViewItemSchema,
+  ImageGenerationItemSchema,
   EnteredReviewModeItemSchema,
   ExitedReviewModeItemSchema,
   RemoteTaskCreatedItemSchema,

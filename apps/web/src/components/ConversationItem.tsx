@@ -38,6 +38,7 @@ const TOOL_BLOCK_TYPES: readonly UnifiedItem["type"][] = [
   "dynamicToolCall",
   "collabAgentToolCall",
   "imageView",
+  "imageGeneration",
   "enteredReviewMode",
   "exitedReviewMode",
   "remoteTaskCreated",
@@ -190,6 +191,8 @@ const ITEM_RENDERERS = {
       />
     );
   },
+
+  agentReasoningSectionBreak: (_args) => null,
 
   plan: ({ item }) => (
     <div className="my-4 rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
@@ -373,6 +376,36 @@ const ITEM_RENDERERS = {
     </ToolCallRow>
   ),
 
+  imageGeneration: ({ item, toolSpacing }) => {
+    const imageSource = item.imageBase64
+      ? `data:image/png;base64,${item.imageBase64}`
+      : null;
+
+    return (
+      <ToolCallRow
+        icon={ImageIcon}
+        iconClassName="text-blue-400"
+        title="Generated image"
+        className={toolSpacing}
+        meta={item.status}
+      >
+        {imageSource && (
+          <img
+            src={imageSource}
+            alt={item.revisedPrompt ?? "Generated image"}
+            loading="lazy"
+            className="mt-2 max-h-[520px] max-w-full rounded-lg border border-border/70 object-contain"
+          />
+        )}
+        {item.revisedPrompt && (
+          <div className="mt-2 text-xs text-foreground/80 whitespace-pre-wrap break-words">
+            {item.revisedPrompt}
+          </div>
+        )}
+      </ToolCallRow>
+    );
+  },
+
   enteredReviewMode: ({ item, toolSpacing }) => (
     <ToolCallRow
       icon={SquarePen}
@@ -462,6 +495,8 @@ function renderItem(
       return ITEM_RENDERERS.error({ item, ...context });
     case "reasoning":
       return ITEM_RENDERERS.reasoning({ item, ...context });
+    case "agentReasoningSectionBreak":
+      return ITEM_RENDERERS.agentReasoningSectionBreak({ item, ...context });
     case "plan":
       return ITEM_RENDERERS.plan({ item, ...context });
     case "todoList":
@@ -486,6 +521,8 @@ function renderItem(
       return ITEM_RENDERERS.collabAgentToolCall({ item, ...context });
     case "imageView":
       return ITEM_RENDERERS.imageView({ item, ...context });
+    case "imageGeneration":
+      return ITEM_RENDERERS.imageGeneration({ item, ...context });
     case "enteredReviewMode":
       return ITEM_RENDERERS.enteredReviewMode({ item, ...context });
     case "exitedReviewMode":

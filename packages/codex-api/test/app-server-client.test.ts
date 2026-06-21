@@ -19,6 +19,41 @@ const START_THREAD_RESPONSE = {
 };
 
 describe("AppServerClient.startThread", () => {
+  it("omits cwd when it is not provided", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      respond: vi.fn().mockResolvedValue(undefined),
+      onServerNotification: vi.fn().mockReturnValue(() => {}),
+      onServerRequest: vi.fn().mockReturnValue(() => {}),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const client = new AppServerClient(transport);
+    await client.startThread({});
+
+    expect(transport.request).toHaveBeenCalledWith("thread/start", {
+      ephemeral: false,
+    });
+  });
+
+  it("passes null cwd when explicitly provided", async () => {
+    const transport: AppServerTransport = {
+      request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),
+      respond: vi.fn().mockResolvedValue(undefined),
+      onServerNotification: vi.fn().mockReturnValue(() => {}),
+      onServerRequest: vi.fn().mockReturnValue(() => {}),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const client = new AppServerClient(transport);
+    await client.startThread({ cwd: null });
+
+    expect(transport.request).toHaveBeenCalledWith("thread/start", {
+      cwd: null,
+      ephemeral: false,
+    });
+  });
+
   it("sets ephemeral to false when it is not provided", async () => {
     const transport: AppServerTransport = {
       request: vi.fn().mockResolvedValue(START_THREAD_RESPONSE),

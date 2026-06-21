@@ -238,7 +238,11 @@ function createHandlerTable(
 
     createThread: async (command) => {
       const created = await adapter.createThread({
-        ...(command.cwd ? { cwd: command.cwd } : {}),
+        ...(command.cwd === null
+          ? { cwd: null }
+          : command.cwd
+            ? { cwd: command.cwd }
+            : {}),
         ...(command.model ? { model: command.model } : {}),
         ...(command.modelProvider
           ? { modelProvider: command.modelProvider }
@@ -898,6 +902,12 @@ function turnItemIdForUnifiedMapping(item: ThreadTurnItem): string {
       return `compaction:${item.encrypted_content}`;
     case "other":
       return "other";
+    case "agent_reasoning_section_break":
+      return `agent_reasoning_section_break:${item.item_id ?? ""}:${String(
+        item.summary_index ?? 0,
+      )}`;
+    case "imageGeneration":
+      return item.id;
     case "automaticApprovalReview":
       return item.id;
     case "mcpServerElicitation":
@@ -1804,6 +1814,18 @@ function mapTurnItem(
         status: "completed",
       };
 
+    case "agent_reasoning_section_break":
+      return {
+        id: `agent_reasoning_section_break:${item.item_id ?? ""}:${String(
+          item.summary_index ?? 0,
+        )}`,
+        type: "agentReasoningSectionBreak",
+        ...(item.item_id !== undefined ? { itemId: item.item_id } : {}),
+        ...(item.summary_index !== undefined
+          ? { summaryIndex: item.summary_index }
+          : {}),
+      };
+
     case "automaticApprovalReview":
       return {
         id: item.id,
@@ -1856,6 +1878,17 @@ function mapTurnItem(
         id: item.id,
         type: "imageView",
         path: item.path,
+      };
+
+    case "imageGeneration":
+      return {
+        id: item.id,
+        type: "imageGeneration",
+        status: item.status,
+        ...(item.revisedPrompt !== undefined
+          ? { revisedPrompt: item.revisedPrompt }
+          : {}),
+        ...(item.result !== undefined ? { imageBase64: item.result } : {}),
       };
 
     case "enteredReviewMode":

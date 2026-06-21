@@ -39,7 +39,8 @@ import {
   type UserInputResponsePayload,
   type UserInputRequestId,
 } from "@farfield/protocol";
-import { readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -141,6 +142,24 @@ const THREAD_REFRESH_RETRY_DELAY_MS = 600;
 const CONNECTION_CHECK_MIN_INTERVAL_MS = 2_000;
 const SESSION_INDEX_PATH = join(homedir(), ".codex", "session_index.jsonl");
 
+function formatLocalDateSegment(date: Date): string {
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildProjectlessThreadCwd(): string {
+  const dateSegment = formatLocalDateSegment(new Date());
+  const suffix = randomUUID().slice(0, 8);
+  return join(
+    homedir(),
+    "Documents",
+    "Codex",
+    `${dateSegment}-new-chat-${suffix}`,
+  );
+}
+
 const SessionIndexEntrySchema = z
   .object({
     id: z.string().min(1),
@@ -193,6 +212,7 @@ export class CodexAgentAdapter implements AgentAdapter {
 
   private readonly threadOwnerById = new Map<string, string>();
   private readonly desktopOwnedThreadIds = new Set<string>();
+  private readonly appServerStartedThreadIds = new Set<string>();
   private readonly pendingAppServerRequestsByThreadId = new Map<
     string,
     PendingAppServerRequestEntry[]
@@ -564,14 +584,11 @@ export class CodexAgentAdapter implements AgentAdapter {
   ): Promise<AgentCreateThreadResult> {
     this.ensureCodexAvailable();
 
-    const cwd = input.cwd;
-    if (!cwd || cwd.trim().length === 0) {
-      throw new Error("Codex thread creation requires cwd");
-    }
+    const cwd = await this.resolveCreateThreadCwd(input.cwd);
 
     const result = await this.runAppServerCall(() =>
       this.appClient.startThread({
-        cwd,
+        ...(cwd ? { cwd } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.modelProvider ? { modelProvider: input.modelProvider } : {}),
         ...(input.personality ? { personality: input.personality } : {}),
@@ -582,6 +599,7 @@ export class CodexAgentAdapter implements AgentAdapter {
         ephemeral: input.ephemeral ?? false,
       }),
     );
+    this.appServerStartedThreadIds.add(result.thread.id);
     this.setThreadTitle(result.thread.id, getThreadListItemTitle(result.thread));
 
     return {
@@ -594,6 +612,19 @@ export class CodexAgentAdapter implements AgentAdapter {
       sandbox: result.sandbox,
       reasoningEffort: result.reasoningEffort,
     };
+  }
+
+  private async resolveCreateThreadCwd(
+    inputCwd: string | null | undefined,
+  ): Promise<string | undefined> {
+    if (inputCwd === null) {
+      const cwd = buildProjectlessThreadCwd();
+      await mkdir(cwd, { recursive: true });
+      return cwd;
+    }
+
+    const cwd = inputCwd?.trim();
+    return cwd ? cwd : undefined;
   }
 
   public async readThread(
@@ -2474,6 +2505,12 @@ export class CodexAgentAdapter implements AgentAdapter {
       this.throwDisconnectedDesktopOwner(threadId);
     }
 
+    if (this.appServerStartedThreadIds.has(threadId)) {
+      return {
+        kind: "app-server",
+      };
+    }
+
     if (this.isIpcReady()) {
       this.throwUnregisteredDesktopOwner(threadId);
     }
@@ -3465,6 +3502,12 @@ function turnItemId(item: TurnItem): string {
       return `compaction:${item.encrypted_content}`;
     case "other":
       return "other";
+    case "agent_reasoning_section_break":
+      return `agent_reasoning_section_break:${item.item_id ?? ""}:${String(
+        item.summary_index ?? 0,
+      )}`;
+    case "imageGeneration":
+      return item.id;
     case "automaticApprovalReview":
       return item.id;
     case "mcpServerElicitation":

@@ -105,6 +105,14 @@ vi.mock("@farfield/api", async (importOriginal) => {
       return readThreadResponse;
     }
 
+    public async startThread(
+      _options: object,
+    ): Promise<{ thread: ThreadConversationState }> {
+      return {
+        thread: readThreadResponse.thread,
+      };
+    }
+
     public async resumeThread(
       threadId: string,
       _options: { persistExtendedHistory: boolean },
@@ -504,6 +512,36 @@ describe("CodexAgentAdapter app-server pending requests", () => {
 
     expect(ipcRequestCalls).toEqual([]);
     expect(startTurnCalls).toEqual([]);
+  });
+
+  it("uses app-server turn start after creating a thread through app-server", async () => {
+    const threadId = "thread-app-server-created-send";
+    const adapter = createAdapter();
+    readThreadResponse = {
+      thread: createThreadState(threadId),
+    };
+    await adapter.start();
+
+    const created = await adapter.createThread({
+      cwd: "/tmp/project",
+      model: "gpt-5.5",
+    });
+    await adapter.sendMessage({
+      threadId: created.threadId,
+      text: "hello from Farfield",
+      model: "gpt-5.5",
+    });
+
+    expect(created.threadId).toBe(threadId);
+    expect(ipcRequestCalls).toEqual([]);
+    expect(startTurnCalls).toEqual([
+      {
+        threadId,
+        input: [{ type: "text", text: "hello from Farfield" }],
+        model: "gpt-5.5",
+        attachments: [],
+      },
+    ]);
   });
 
   it("clears stale owner client and reports disconnected desktop owner", async () => {

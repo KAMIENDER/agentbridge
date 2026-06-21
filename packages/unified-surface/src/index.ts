@@ -569,6 +569,15 @@ const UnifiedReasoningItemSchema = z
   })
   .strict();
 
+const UnifiedAgentReasoningSectionBreakItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("agentReasoningSectionBreak"),
+    itemId: z.string().optional(),
+    summaryIndex: NonNegativeIntSchema.optional()
+  })
+  .strict();
+
 const UnifiedPlanItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -814,6 +823,16 @@ const UnifiedImageViewItemSchema = z
   })
   .strict();
 
+const UnifiedImageGenerationItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    type: z.literal("imageGeneration"),
+    status: z.enum(["generating", "completed", "failed"]),
+    revisedPrompt: NullableStringSchema.optional(),
+    imageBase64: NullableStringSchema.optional()
+  })
+  .strict();
+
 const UnifiedEnteredReviewModeItemSchema = z
   .object({
     id: NonEmptyStringSchema,
@@ -869,6 +888,7 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedAgentMessageItemSchema,
   UnifiedErrorItemSchema,
   UnifiedReasoningItemSchema,
+  UnifiedAgentReasoningSectionBreakItemSchema,
   UnifiedPlanItemSchema,
   UnifiedTodoListItemSchema,
   UnifiedPlanImplementationItemSchema,
@@ -881,6 +901,7 @@ export const UnifiedItemSchema = z.discriminatedUnion("type", [
   UnifiedDynamicToolCallItemSchema,
   UnifiedCollabAgentToolCallItemSchema,
   UnifiedImageViewItemSchema,
+  UnifiedImageGenerationItemSchema,
   UnifiedEnteredReviewModeItemSchema,
   UnifiedExitedReviewModeItemSchema,
   UnifiedRemoteTaskCreatedItemSchema,
@@ -898,6 +919,7 @@ export const UNIFIED_ITEM_KINDS = [
   "agentMessage",
   "error",
   "reasoning",
+  "agentReasoningSectionBreak",
   "plan",
   "todoList",
   "planImplementation",
@@ -910,6 +932,7 @@ export const UNIFIED_ITEM_KINDS = [
   "dynamicToolCall",
   "collabAgentToolCall",
   "imageView",
+  "imageGeneration",
   "enteredReviewMode",
   "exitedReviewMode",
   "remoteTaskCreated",
@@ -997,7 +1020,7 @@ const UnifiedCommandCreateThreadSchema = z
   .object({
     kind: z.literal("createThread"),
     provider: UnifiedProviderIdSchema,
-    cwd: z.string().optional(),
+    cwd: NullableStringSchema.optional(),
     model: z.string().optional(),
     modelProvider: z.string().optional(),
     personality: z.string().optional(),
@@ -1702,6 +1725,7 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   agentMessage: true,
   error: true,
   reasoning: true,
+  agentReasoningSectionBreak: true,
   plan: true,
   todoList: true,
   planImplementation: true,
@@ -1714,6 +1738,7 @@ const ITEM_KIND_COVERAGE: Record<UnifiedItemKind, true> = {
   dynamicToolCall: true,
   collabAgentToolCall: true,
   imageView: true,
+  imageGeneration: true,
   enteredReviewMode: true,
   exitedReviewMode: true,
   remoteTaskCreated: true,

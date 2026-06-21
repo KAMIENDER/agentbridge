@@ -564,6 +564,29 @@ describe("codex-protocol schemas", () => {
     expect(parsed.turns[0]?.items[0]?.type).toBe("userInputResponse");
   });
 
+  it("parses thread conversation state with agent reasoning section break item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              type: "agent_reasoning_section_break",
+              item_id: "reasoning-1",
+              summary_index: 1
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe(
+      "agent_reasoning_section_break"
+    );
+  });
+
   it("parses userInputResponse item when completed is omitted", () => {
     const parsed = parseThreadConversationState({
       id: "thread-123",
@@ -928,6 +951,29 @@ describe("codex-protocol schemas", () => {
     });
 
     expect(parsed.turns[0]?.items[0]?.type).toBe("contextCompaction");
+  });
+
+  it("parses thread conversation state with imageGeneration item", () => {
+    const parsed = parseThreadConversationState({
+      id: "thread-123",
+      turns: [
+        {
+          status: "completed",
+          items: [
+            {
+              id: "item-image-generation",
+              type: "imageGeneration",
+              status: "completed",
+              revisedPrompt: "A compact product screenshot",
+              result: "iVBORw0KGgo="
+            }
+          ]
+        }
+      ],
+      requests: []
+    });
+
+    expect(parsed.turns[0]?.items[0]?.type).toBe("imageGeneration");
   });
 
   it("parses thread conversation state with modelChanged item", () => {
